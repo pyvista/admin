@@ -2,12 +2,23 @@
 # Run peribolos against the pyvista org.
 #
 # Called from both GitHub Actions workflows and the Makefile. Takes a single
-# argument: ``dry-run`` (default) or ``apply``. Reads GITHUB_TOKEN from the
-# environment and writes it to a temporary file that peribolos can read.
+# argument: ``dry-run`` (default) or ``apply``.
+#
+# Auth modes:
+#   1. In CI, set APP_ID and APP_PRIVATE_KEY. Peribolos talks to GitHub as the
+#      peribolos-admin GitHub App natively, which sidesteps the GET /user call
+#      that installation tokens can't make.
+#   2. Locally, set GITHUB_TOKEN to a personal PAT (or `gh auth token`).
+#      Peribolos authenticates as you.
+#
+# GITHUB_TOKEN is always required because scripts/sync-repos.py uses it for
+# repo listing and outside-collaborator cleanup. In CI, pass the installation
+# token from actions/create-github-app-token as GITHUB_TOKEN plus the App
+# credentials as APP_ID / APP_PRIVATE_KEY.
 #
 # Usage:
 #   GITHUB_TOKEN=... scripts/run-peribolos.sh dry-run
-#   GITHUB_TOKEN=... scripts/run-peribolos.sh apply
+#   APP_ID=... APP_PRIVATE_KEY=... GITHUB_TOKEN=... scripts/run-peribolos.sh apply
 
 set -euo pipefail
 
@@ -20,7 +31,7 @@ fi
 PERIBOLOS_IMAGE="us-docker.pkg.dev/k8s-infra-prow/images/peribolos:latest"
 
 if [[ -z ${GITHUB_TOKEN:-} ]]; then
-  echo "ERROR: GITHUB_TOKEN environment variable is required." >&2
+  echo "ERROR: GITHUB_TOKEN environment variable is required (used by sync-repos.py)." >&2
   exit 1
 fi
 
@@ -29,20 +40,37 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# Write the token to a temp file; peribolos reads credentials from disk.
-TOKEN_DIR="$(mktemp -d)"
+CRED_DIR="$(mktemp -d)"
 LOG_FILE="$(mktemp)"
-trap 'rm -rf "$TOKEN_DIR" "$LOG_FILE"' EXIT
-printf '%s' "$GITHUB_TOKEN" >"$TOKEN_DIR/token"
-chmod 600 "$TOKEN_DIR/token"
+trap 'rm -rf "$CRED_DIR" "$LOG_FILE"' EXIT
 
 # Expand the committed org.yaml with live repo state and the per-repo baseline.
-# On apply, also remove drifted outside collaborators.
+# On apply, also remove drifted outside collaborators. sync-repos.py uses
+# GITHUB_TOKEN from the environment.
 SYNC_ARGS=(--output org-expanded.yaml)
 if [[ $MODE == "apply" ]]; then
   SYNC_ARGS+=(--remove-outside-collaborators)
 fi
 uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
+
+# Pick the peribolos auth mode. Native App auth avoids the /user 403 that
+# installation tokens hit; fall back to a PAT for local use.
+PERIBOLOS_AUTH_ARGS=()
+DOCKER_AUTH_VOL=()
+if [[ -n ${APP_ID:-} && -n ${APP_PRIVATE_KEY:-} ]]; then
+  printf '%s' "$APP_PRIVATE_KEY" >"$CRED_DIR/app.pem"
+  chmod 600 "$CRED_DIR/app.pem"
+  PERIBOLOS_AUTH_ARGS=(
+    "--github-app-id=$APP_ID"
+    --github-app-private-key-path=/etc/github/app.pem
+  )
+  DOCKER_AUTH_VOL=(-v "$CRED_DIR/app.pem:/etc/github/app.pem:ro")
+else
+  printf '%s' "$GITHUB_TOKEN" >"$CRED_DIR/token"
+  chmod 600 "$CRED_DIR/token"
+  PERIBOLOS_AUTH_ARGS=(--github-token-path=/etc/github/token)
+  DOCKER_AUTH_VOL=(-v "$CRED_DIR/token:/etc/github/token:ro")
+fi
 
 # Peribolos arguments. Add --confirm only for apply mode.
 # --min-admins=2 matches our intentional two-admin posture (akaszynski,
@@ -50,7 +78,6 @@ uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
 # we accept the tighter floor knowing admin membership is PR-gated here.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
-  --github-token-path=/etc/github/token
   --min-admins=2
   --fix-org
   --fix-org-members
@@ -68,9 +95,9 @@ fi
 set +e
 docker run --rm --platform linux/amd64 \
   -v "$PWD:/workspace" \
-  -v "$TOKEN_DIR/token:/etc/github/token:ro" \
+  "${DOCKER_AUTH_VOL[@]}" \
   -w /workspace \
-  "$PERIBOLOS_IMAGE" "${PERIBOLOS_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
+  "$PERIBOLOS_IMAGE" "${PERIBOLOS_AUTH_ARGS[@]}" "${PERIBOLOS_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
 EXIT=${PIPESTATUS[0]}
 set -e
 

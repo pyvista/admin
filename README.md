@@ -137,18 +137,17 @@ Rules we hold to so this setup stays useful instead of becoming its own friction
 
 ## Local development
 
+Peribolos itself only runs in CI. Locally, you can lint the config and check membership consistency against the live org before opening a PR.
+
 ```
 make help            Show all available targets
 make install         Install pre-commit git hooks
 make lint            Run all pre-commit hooks on all files
 make check           Validate org.yaml against live GitHub state (requires GITHUB_TOKEN)
-make expand          Produce org-expanded.yaml locally (requires GITHUB_TOKEN)
-make dry-run         Preview what peribolos would change (requires GITHUB_TOKEN + docker)
-make apply           Apply org.yaml to GitHub (break-glass; requires CONFIRM=yes)
 make ci              lint + check combined
 ```
 
-For targets that hit the live org, export `GITHUB_TOKEN` first. For ad-hoc local runs, a PAT or `gh auth token` both work; CI uses a short-lived token minted from the `peribolos-admin` GitHub App.
+For `make check`, export `GITHUB_TOKEN` first. Any PAT with `read:org` or `gh auth token` works.
 
 ## How this works under the hood
 
@@ -161,7 +160,7 @@ The org is managed by [peribolos](https://github.com/kubernetes-sigs/prow/tree/m
 3. Runs a consistency audit: no orphan members, no phantom team users. Exits non-zero if the committed config is broken, failing CI before peribolos runs.
 4. On apply, also removes any outside collaborators from the org. Since no `org.yaml` entry lists outside collaborators, every one found is drift.
 
-**`scripts/run-peribolos.sh`** is the single entry point for running peribolos. Both GitHub Actions workflows (`dry-run.yml`, `apply.yml`) and the Makefile call it. It mints a token file from `$GITHUB_TOKEN`, runs the sync script, and invokes the peribolos docker image against the expanded config.
+**`scripts/run-peribolos.sh`** is the single entry point for running peribolos. Both GitHub Actions workflows (`dry-run.yml`, `apply.yml`) call it. It runs the sync script, writes App credentials to a temp file, and invokes the peribolos docker image against the expanded config, then posts a readable summary to the Actions job summary so reviewers can see what would change.
 
 **Authentication** is via a GitHub App called `peribolos-admin`, installed on the pyvista org and scoped to the permissions it needs (team and repository administration, member management). The App's private key is stored as a repo secret and rotated on a schedule. It is the only long-lived credential in the system.
 
