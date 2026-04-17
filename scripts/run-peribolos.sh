@@ -31,7 +31,8 @@ fi
 
 # Write the token to a temp file; peribolos reads credentials from disk.
 TOKEN_DIR="$(mktemp -d)"
-trap 'rm -rf "$TOKEN_DIR"' EXIT
+LOG_FILE="$(mktemp)"
+trap 'rm -rf "$TOKEN_DIR" "$LOG_FILE"' EXIT
 printf '%s' "$GITHUB_TOKEN" >"$TOKEN_DIR/token"
 chmod 600 "$TOKEN_DIR/token"
 
@@ -57,8 +58,36 @@ if [[ $MODE == "apply" ]]; then
   PERIBOLOS_ARGS+=(--confirm)
 fi
 
+# Run peribolos, stream output to the job log and capture to a file for the
+# summary. Disable set -e for the docker invocation so a peribolos failure
+# still flows into the summary; restore the exit code at the end.
+set +e
 docker run --rm --platform linux/amd64 \
   -v "$PWD:/workspace" \
   -v "$TOKEN_DIR/token:/etc/github/token:ro" \
   -w /workspace \
-  "$PERIBOLOS_IMAGE" "${PERIBOLOS_ARGS[@]}"
+  "$PERIBOLOS_IMAGE" "${PERIBOLOS_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
+EXIT=${PIPESTATUS[0]}
+set -e
+
+# Post a readable dry-run / apply summary to the GitHub Actions job summary.
+# Peribolos logs in JSON; extract level + msg per line for humans.
+if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+  {
+    printf '## peribolos %s\n\n' "$MODE"
+    if [[ $MODE == "dry-run" ]]; then
+      printf 'Changes peribolos _would_ make against the live pyvista org:\n\n'
+    else
+      printf 'Changes peribolos applied against the live pyvista org:\n\n'
+    fi
+    printf '```\n'
+    if command -v jq >/dev/null 2>&1; then
+      jq -Rr 'try (fromjson | "\(.level | ascii_upcase): \(.msg)") catch .' <"$LOG_FILE"
+    else
+      cat "$LOG_FILE"
+    fi
+    printf '```\n'
+  } >>"$GITHUB_STEP_SUMMARY"
+fi
+
+exit "$EXIT"

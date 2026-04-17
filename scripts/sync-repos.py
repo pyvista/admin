@@ -302,11 +302,16 @@ def main() -> int:
     apply_repo_baseline(data, live_repos)
     expand(data, live_repos)
 
+    # Peribolos expects config wrapped under orgs.<name>. The committed
+    # org.yaml is stored flat for readability (matches what `peribolos --dump`
+    # produces for a single org). Wrap it here for peribolos consumption.
+    wrapped = {"orgs": {ORG: data}}
+
     if args.output:
         with args.output.open("w") as f:
-            yaml.dump(data, f)
+            yaml.dump(wrapped, f)
     else:
-        yaml.dump(data, sys.stdout)
+        yaml.dump(wrapped, sys.stdout)
 
     # Outside collaborators are non-org-members with per-repo access. No
     # org.yaml entry grants this, so every one we see is drift. Warn on PR
