@@ -76,9 +76,13 @@ fi
 # --min-admins=2 matches our intentional two-admin posture (akaszynski,
 # banesullivan). Peribolos's default minimum is 5 as a lockout safeguard;
 # we accept the tighter floor knowing admin membership is PR-gated here.
+# --dry-run=false tells prow's GitHub client that it can mint App installation
+# tokens (which is technically a POST, blocked by the client's own dry-run).
+# Actual mutations are still gated by peribolos's --confirm flag.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --min-admins=2
+  --dry-run=false
   --fix-org
   --fix-org-members
   --fix-teams
