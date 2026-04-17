@@ -1,0 +1,172 @@
+# pyvista/admin
+
+Declarative config for the PyVista GitHub org. Membership, teams, repository access, and security policies live here as YAML configurations.
+
+If you contribute to PyVista projects and want to understand how access works, propose a change, or get promoted, this is the place.
+
+## Why this exists
+
+PyVista runs on a lot of repositories and a growing community. Managing that in admins' DMs does not scale and leaves no audit trail. Also its really hard to manage all of this through the GitHub UI and a lot of things were slipping through the cracks.
+
+- **Democratized management.** Any contributor can open a PR proposing a change to how the org is run. Decisions happen here, in public.
+- **Auditable governance.** Every change to team membership, repo access, or org settings ships as a commit. "Who added this person, and when?" always has an answer.
+- **Tight security posture.** We're working to make sure we have a centralized place to know who has write and maintain access to various repositories (this was previously only visible to org admins)
+
+## Team structure
+
+GitHub nests teams parent-to-child. A member of a child team is automatically a member of the parent, and inherited permissions stack. We use that to build a promotion ladder and to stamp narrower roles onto it.
+
+```
+collaborators            triage on every public repo
+└── kitware              + write on pyvista and pyvista-xarray (@Kitware folks)
+
+developers               write on every public repo
+├── dev-tools-admin      + admin on typing / mypy plugin repos (user27182)
+├── maintainers          maintain on every public repo
+│   ├── admin            admin on every repo, sole access to the admin repo
+│   ├── ci-reviewers     mention target for CI review routing, no repo grants
+│   └── leaders          @pyvista/leaders mention target, no repo grants
+└── pyvistaqt-admin      + admin on the PyVistaQt stack (larsoner)
+
+robots                   write on pyvista (pyvista-bot)
+```
+
+### How repo access is granted
+
+The three broad-access teams (`collaborators`, `developers`, `maintainers`) cover every public repo in the org automatically. They have no `repos:` list in the committed `org.yaml`. Before every peribolos run, `scripts/sync-repos.py` queries the GitHub API for the live set of public repos and expands the config in memory. New repos are picked up by the next daily apply. Archived repos drop off collaborators/developers/maintainers and stay with admin.
+
+The narrower-scope teams list their repos explicitly in `org.yaml`: `kitware`, `pyvistaqt-admin`, `dev-tools-admin`, and `robots`. Those lists are hand-maintained because they express a choice about who should have access to what.
+
+`ci-reviewers` and `leaders` have no repo grants at all. They exist as mention targets (`@pyvista/ci-reviewers`, `@pyvista/leaders`) and to make their members inherit maintainers access via team nesting.
+
+### Roles at a glance
+
+| Role                              | Access on every public repo        |
+| --------------------------------- | ---------------------------------- |
+| Org owner (in top-level `admins`) | Full org-owner powers              |
+| `admin` team member               | `admin`                            |
+| `maintainers` team member         | `maintain`                         |
+| `developers` team member          | `write`                            |
+| `collaborators` team member       | `triage`                           |
+| Org member, no team               | none (enforced by CI orphan check) |
+| Outside contributor               | fork, open PRs, open issues        |
+
+The authoritative, current membership of each team is always in [`org.yaml`](./org.yaml). If this README disagrees with it, `org.yaml` wins, because `org.yaml` is what GitHub actually applies.
+
+### Promotion ladder
+
+A contributor starts as a **collaborator** on the repos they work on, which grants triage everywhere (label, close, assign issues and PRs). As their code reach grows they move to **developer**, picking up write on every public repo. When they are already doing releases, triage across multiple repos, and cross-repo review, they become a **maintainer**.
+
+`admin`, `ci-reviewers`, and `leaders` are not tiers on the promotion ladder. Each is nested under `maintainers` for a specific purpose (org control, CI review routing, community leadership mention target). Someone can be added to any of them without being "promoted."
+
+## How changes happen
+
+Every change flows through a PR.
+
+1. **Propose.** Open a PR editing `org.yaml`. Say what and why.
+2. **Dry-run.** A GitHub Action runs [peribolos](https://github.com/kubernetes-sigs/prow/tree/main/cmd/peribolos) on the PR in read-only mode and reports the exact diff against live GitHub state.
+3. **Review.** The `@pyvista/admin` team reviews. Permission changes and new members get discussed here, publicly.
+4. **Merge.** Merging to `main` triggers apply. Peribolos reconciles GitHub to match within seconds.
+
+The dry-run removes guesswork. The reviewer sees _"this PR adds @user to developers and grants her write on 49 repos"_ before the merge happens.
+
+A daily cron also runs the apply workflow so that repos created, archived, or deleted on GitHub in between PRs flow into team access without anyone having to open a PR.
+
+## Common tasks
+
+Don't see yours? Open an issue.
+
+### Join the pyvista org as a member
+
+Org membership goes to regular contributors and active community participants. Open an issue titled _"Request org membership"_ and `@` mention the user (if not yourself) with a short note on what why. An admin will respond.
+
+Org members appear in `org.yaml` under `members:`. Adding someone is a PR. Anyone added to `members:` **must** also be added to at least one team in the same PR. The sync script fails CI otherwise.
+
+### Get access to a specific repository
+
+Most access flows through the team ladder. If you are already in `collaborators`, `developers`, or `maintainers`, your access matches the table above. For access to a repo outside your team's scope (focused collaborator on one package, for example), open an issue describing what you need and why, and tag `@pyvista/admin`.
+
+### Get promoted to the next team
+
+Promotion is recognition of what you are already doing. There is no rigid checklist. The broad pattern:
+
+- **To collaborators:** you've been contributing regularly to one area and a maintainer wants to streamline your access.
+- **To developers:** you review and merge on multiple repos across the org.
+- **To maintainers:** you're already doing releases, triage, and cross-repo coordination. Formalizing the role removes friction.
+
+Anyone can self-nominate by opening a PR that moves their handle into the target team. You don't need to wait to be offered. The `@pyvista/admin` team reviews on the PR.
+
+Nominating someone else works the same way. Open the PR, tag the person, discuss in the open.
+
+### Add a new repository to the organization
+
+Repo creation is restricted to org admins. Open an issue on this repo with the proposed name, what it's for, and why it belongs under `pyvista/`. An admin creates the repo on GitHub once agreed. No PR against `org.yaml` is needed for team access; within 24 hours the daily apply grants `collaborators` triage, `developers` write, `maintainers` maintain, and `admin` admin automatically. An admin can trigger the apply workflow manually to skip the wait.
+
+For custom settings beyond the baseline (branch protection, non-default team grants, specific merge rules), add an entry to the top-level `repos:` section of `org.yaml` via PR. The org baseline (squash-only merges, wikis off, projects off, auto-merge allowed, delete-branch-on-merge) is already covered without a per-repo entry.
+
+### Archive, transfer, or delete a repository
+
+Higher-stakes. Open an issue with the proposal. Admins discuss, then make the change on GitHub. For deletions, the next sync-repos.py run prunes the dead repo from the expanded config automatically. If the repo had a custom entry in the top-level `repos:` section, follow up with a PR to remove it.
+
+### Remove myself from the org or a team
+
+Open a PR against `org.yaml` removing your handle from both `members:` and any team. No justification required; we will merge it. You can also leave through the GitHub UI at any time.
+
+### Report a security vulnerability in a pyvista project
+
+**Do not open a public issue.** Use the project's private vulnerability reporting channel (Security tab on the affected repo) or email `info@pyvista.org`. See `SECURITY.md` in the affected repo.
+
+### Report a code-of-conduct concern
+
+Email the maintainers per the procedure in the project's `CODE_OF_CONDUCT.md`. Reports are handled privately and are not discussed in PRs on this repo.
+
+### Ask a general question
+
+Most pyvista discussion happens in [pyvista/pyvista/discussions](https://github.com/pyvista/pyvista/discussions). For questions specifically about how the org is run, open an issue here.
+
+## Operating principles
+
+Rules we hold to so this setup stays useful instead of becoming its own friction.
+
+- **Decisions about the org happen as PRs here.** DMs, Slack threads, and verbal agreements leave no trail.
+- **Least privilege by default.** `default_repository_permission: none` on the org itself. People get the access their role requires, no more. Granting more later is easier than clawing it back.
+- **No long-lived credentials.** Automation uses a GitHub App that mints short-lived installation tokens. No PATs in CI. Flag any you see; it's a bug.
+- **One place per person.** A user is listed in the single deepest team that matches their role. Nested teams inherit up. The sync script fails CI if it finds an orphan (in `members:` with no team) or a phantom (in a team but not in `members:`).
+- **No outside collaborators, ever.** GitHub allows repo admins to add non-org-members directly to a repo. The apply workflow removes any it finds on every run. If an external contributor needs ongoing access, invite them as an org member and place them in a team.
+- **Admin repo reviewed by someone other than the author.** `CODEOWNERS` requires `@pyvista/admin` approval on every PR here, admins' own changes included.
+
+## Local development
+
+```
+make help            Show all available targets
+make install         Install pre-commit git hooks
+make lint            Run all pre-commit hooks on all files
+make check           Validate org.yaml against live GitHub state (requires GITHUB_TOKEN)
+make expand          Produce org-expanded.yaml locally (requires GITHUB_TOKEN)
+make dry-run         Preview what peribolos would change (requires GITHUB_TOKEN + docker)
+make apply           Apply org.yaml to GitHub (break-glass; requires CONFIRM=yes)
+make ci              lint + check combined
+```
+
+For targets that hit the live org, export `GITHUB_TOKEN` first. For ad-hoc local runs, a PAT or `gh auth token` both work; CI uses a short-lived token minted from the `peribolos-admin` GitHub App.
+
+## How this works under the hood
+
+The org is managed by [peribolos](https://github.com/kubernetes-sigs/prow/tree/main/cmd/peribolos), a tool from the Kubernetes project. It reads an expanded `org.yaml`, compares it against GitHub, and reconciles drift. Two layers sit on top:
+
+**`scripts/sync-repos.py`** queries GitHub for the live repo list on every run, then:
+
+1. Fills in `repos:` lists for the four broad-access teams (`collaborators` / `developers` / `maintainers` / `admin`) so we don't have to maintain them by hand.
+2. Applies `REPO_BASELINE` (squash-only merges, wikis off, auto-merge on, delete head branch on merge) to every public non-archived repo. Per-repo entries in committed `org.yaml` override baseline key-by-key.
+3. Runs a consistency audit: no orphan members, no phantom team users. Exits non-zero if the committed config is broken, failing CI before peribolos runs.
+4. On apply, also removes any outside collaborators from the org. Since no `org.yaml` entry lists outside collaborators, every one found is drift.
+
+**`scripts/run-peribolos.sh`** is the single entry point for running peribolos. Both GitHub Actions workflows (`dry-run.yml`, `apply.yml`) and the Makefile call it. It mints a token file from `$GITHUB_TOKEN`, runs the sync script, and invokes the peribolos docker image against the expanded config.
+
+**Authentication** is via a GitHub App called `peribolos-admin`, installed on the pyvista org and scoped to the permissions it needs (team and repository administration, member management). The App's private key is stored as a repo secret and rotated on a schedule. It is the only long-lived credential in the system.
+
+**Pre-commit** enforces code quality and security hygiene: [zizmor](https://github.com/zizmorcore/zizmor) for GitHub Actions security, [gitleaks](https://github.com/gitleaks/gitleaks) for secret leaks, [check-jsonschema](https://github.com/python-jsonschema/check-jsonschema) for workflow schema, ruff for the Python script, prettier for YAML/Markdown, codespell for typos.
+
+---
+
+Questions, suggestions, or disagreements? Please open an issue here.
