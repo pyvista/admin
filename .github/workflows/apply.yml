@@ -45,6 +45,4 @@ jobs:
       - name: Run peribolos (apply)
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          APP_ID: ${{ vars.PERIBOLOS_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.PERIBOLOS_APP_PRIVATE_KEY }}
         run: scripts/run-peribolos.sh apply
