@@ -45,9 +45,13 @@ fi
 uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
 
 # Peribolos arguments. Add --confirm only for apply mode.
+# --min-admins=2 matches our intentional two-admin posture (akaszynski,
+# banesullivan). Peribolos's default minimum is 5 as a lockout safeguard;
+# we accept the tighter floor knowing admin membership is PR-gated here.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token
+  --min-admins=2
   --fix-org
   --fix-org-members
   --fix-teams
