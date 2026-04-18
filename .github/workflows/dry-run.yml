@@ -6,6 +6,9 @@ on:
       - org.yaml
       - scripts/**
       - .github/workflows/**
+  # Re-run for the merge queue so required checks pass on the rebased merge
+  # commit before it lands on main.
+  merge_group:
 
 permissions:
   contents: read
