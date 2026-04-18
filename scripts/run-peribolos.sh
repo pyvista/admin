@@ -68,12 +68,19 @@ uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
 # member removals. The initial bootstrap removes ~30% of current members
 # (cleanup of drift + off-boarding tkoyama010 as org owner). Safe to
 # tighten back to 0.25 after the first apply settles the drift.
+#
+# --github-hourly-tokens / --github-allowed-burst raise peribolos's
+# client-side throttle. Defaults (300/100) make even idempotent runs take
+# 10+ minutes due to the volume of list calls. GitHub's hard limit for
+# App tokens is 5000/hour; 4000 leaves safety margin.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token
   --min-admins=2
   --require-self=false
   --maximum-removal-delta=0.5
+  --github-hourly-tokens=4000
+  --github-allowed-burst=500
   --fix-org
   --fix-org-members
   --fix-teams
