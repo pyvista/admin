@@ -55,7 +55,7 @@ ORG_YAML = Path(__file__).resolve().parent.parent / "org.yaml"
 
 # Team → (permission, include archived, include admin repo). These teams are
 # broad-access teams; their repo lists are fully auto-generated from the live
-# org state. Narrower-scope teams (pyvistaqt-admin, dev-tools-admin, robots)
+# org state. Narrower-scope teams (pyvistaqt-admin, robots)
 # keep their repo lists in the committed org.yaml.
 #
 # developers include the admin repo so anyone with write access to pyvista
