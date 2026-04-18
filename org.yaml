@@ -79,16 +79,6 @@ teams:
     - MariusCausemann
     privacy: closed
     teams:
-      dev-tools-admin:
-        description: Admins for dev tools
-        members:
-        - user27182
-        privacy: closed
-        repos:
-          ducktype-mypy-plugin: admin
-          npt-promote: admin
-          pre-commit-mypy: admin
-          vtk-xref: admin
       maintainers:
         description: Trusted core developers responsible for triage, review, and releases. Maintain access is granted automatically on every public repo. Members inherit developers write access via team nesting.
         members:
