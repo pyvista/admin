@@ -1,0 +1,152 @@
+# --- Identity ---
+name: PyVista
+description: A community effort to make 3D visualization and analysis more approachable
+email: info@pyvista.org
+location: The Future
+company: ""
+
+# --- Organization owners (top-level admins in GitHub) ---
+admins:
+- akaszynski
+- banesullivan
+
+# --- Org-wide policies ---
+# Members get nothing by default; access comes only via teams.
+default_repository_permission: none
+# GitHub cannot restrict repo creation to a specific team. `false` means only
+# org admins (the `admins` list above) can create repos. Maintainers open an
+# issue or PR to request a new repo; an admin creates it and the daily apply
+# enrolls it into the core teams automatically.
+members_can_create_repositories: false
+two_factor_requirement_enabled: true
+# Projects (classic) are off everywhere. Individual repos may still re-enable
+# via `has_projects: true` in the repos section below if there's a real need.
+has_organization_projects: false
+has_repository_projects: false
+
+# --- Members ---
+members:
+- adeak
+- AlejandroFernandezLuces
+- alesgenova
+- annehaley
+- bjlittle
+- ChristosT
+- danpak94
+- edabor
+- jbusecke
+- jourdain
+- jspanchu
+- keurfonluu
+- larsoner
+- Louis-Pujol
+- MariusCausemann
+- MatthewFlamm
+- pyvista-bot
+- tkoyama010
+- user27182
+- whophil
+
+# --- Teams ---
+teams:
+  collaborators:
+    description: For general collaborators that don't need to be notified of core-dev topics. Triage access to every public repo is granted automatically by the repo-sync step of the peribolos workflows.
+    members:
+    - whophil
+    - keurfonluu
+    - AlejandroFernandezLuces
+    - adeak
+    - jbusecke
+    privacy: closed
+    teams:
+      kitware:
+        description: Collaborators from @Kitware. Members inherit collaborators triage access on every public repo via team nesting; this team grants write on the core pyvista code and xarray bridge.
+        members:
+        - jourdain
+        - ChristosT
+        - alesgenova
+        - annehaley
+        - jspanchu
+        privacy: closed
+        repos:
+          pyvista: write
+          pyvista-xarray: write
+  developers:
+    description: Developers for the PyVista project and related packages. Write access to every public repo is granted automatically by the repo-sync step of the peribolos workflows. Trusted developers are promoted to the nested maintainers team.
+    members:
+    - danpak94
+    - Louis-Pujol
+    - MariusCausemann
+    privacy: closed
+    teams:
+      dev-tools-admin:
+        description: Admins for dev tools
+        members:
+        - user27182
+        privacy: closed
+        repos:
+          ducktype-mypy-plugin: admin
+          npt-promote: admin
+          pre-commit-mypy: admin
+          vtk-xref: admin
+      maintainers:
+        description: Trusted core developers responsible for triage, review, and releases. Maintain access is granted automatically on every public repo. Members inherit developers write access via team nesting.
+        members:
+        - bjlittle
+        - edabor
+        - MatthewFlamm
+        - user27182
+        - tkoyama010
+        privacy: closed
+        teams:
+          # Administrative and leadership teams. Do not promote users into these as a tier.
+          # Keep them in the maintainers team and add them to admin or leaders explicitly
+          # based on the role they take on.
+          admin:
+            description: Organization admins. Admin access is granted automatically on every repo, and the admin team is the sole team with access to this repository. Members inherit developers + maintainers via team nesting.
+            maintainers:
+            - akaszynski
+            - banesullivan
+            privacy: closed
+          ci-reviewers:
+            description: CODEOWNERS routing target for PRs that modify CI workflows. Members inherit maintainers access via team nesting; this team itself grants no repo access.
+            members:
+            - akaszynski
+            - banesullivan
+            privacy: closed
+          leaders:
+            description: Community leaders for the PyVista project. Members inherit maintainers access via team nesting; this team itself grants no repo access and exists as a @pyvista/leaders mention target.
+            members:
+            - akaszynski
+            - banesullivan
+            - tkoyama010
+            privacy: closed
+      pyvistaqt-admin:
+        description: Admins for the PyVistaQt suite of repositories
+        members:
+        - larsoner
+        privacy: closed
+        repos:
+          pyvista-gui: admin
+          pyvistaqt: admin
+          pyvistaqt-docs: admin
+          pyvistaqt-exe: admin
+          setup-headless-display-action: admin
+          vtkjs-viewer: write
+  robots:
+    description: Automation accounts
+    members:
+    - pyvista-bot
+    privacy: secret
+    repos:
+      pyvista: write
+
+# --- Repository configuration ---
+#
+# Every public non-archived repo gets REPO_BASELINE (squash-only merges,
+# has_wiki: false, auto-merge, delete branch on merge) applied automatically
+# by scripts/sync-repos.py. Entries here are deliberate per-repo deviations
+# from that baseline. Keep this list short.
+repos:
+  admin:
+    web_commit_signoff_required: true
