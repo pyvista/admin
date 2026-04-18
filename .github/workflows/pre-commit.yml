@@ -20,3 +20,8 @@ jobs:
         with:
           python-version: "3.12"
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+        env:
+          # no-commit-to-branch is a local-dev guard against pushing directly
+          # to main; in CI on main it would always fail. GitHub branch
+          # protection + CODEOWNERS enforce the same thing server-side.
+          SKIP: no-commit-to-branch

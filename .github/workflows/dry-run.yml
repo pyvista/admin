@@ -28,6 +28,18 @@ jobs:
           app-id: ${{ vars.PERIBOLOS_APP_ID }}
           private-key: ${{ secrets.PERIBOLOS_APP_PRIVATE_KEY }}
           owner: pyvista
+          # Scope the token to read-only. Dry-run only reads org state; the
+          # ghclient's internal dry-run layer intercepts any mutating calls.
+          # Limiting the token here means even a malicious PR that exfiltrates
+          # it cannot use it to mutate the org.
+          #
+          # Each permission requested must be one the peribolos-admin App has
+          # actually been granted. App permissions: Administration (repo),
+          # Metadata (repo), Organization Administration, Members (org).
+          permission-administration: read
+          permission-metadata: read
+          permission-organization-administration: read
+          permission-members: read
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8
