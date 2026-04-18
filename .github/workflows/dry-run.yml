@@ -32,8 +32,11 @@ jobs:
           # ghclient's internal dry-run layer intercepts any mutating calls.
           # Limiting the token here means even a malicious PR that exfiltrates
           # it cannot use it to mutate the org.
+          #
+          # Each permission requested must be one the peribolos-admin App has
+          # actually been granted. App permissions: Administration (repo),
+          # Metadata (repo), Organization Administration, Members (org).
           permission-administration: read
-          permission-contents: read
           permission-metadata: read
           permission-organization-administration: read
           permission-members: read
