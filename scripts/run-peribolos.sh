@@ -18,6 +18,14 @@ if [[ $MODE != "dry-run" && $MODE != "apply" ]]; then
   exit 2
 fi
 
+# In CI, apply mode is only allowed on main. The environment gate in apply.yml
+# is the primary defense; this is a belt-and-suspenders check in case someone
+# calls the script directly from a workflow that bypassed the environment.
+if [[ $MODE == "apply" && ${GITHUB_ACTIONS:-} == "true" && ${GITHUB_REF:-} != "refs/heads/main" ]]; then
+  echo "ERROR: apply mode in CI is restricted to main (GITHUB_REF=${GITHUB_REF:-unset})" >&2
+  exit 1
+fi
+
 PERIBOLOS_IMAGE="us-docker.pkg.dev/k8s-infra-prow/images/peribolos:latest"
 
 if [[ -z ${GITHUB_TOKEN:-} ]]; then

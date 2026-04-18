@@ -164,6 +164,13 @@ The org is managed by [peribolos](https://github.com/kubernetes-sigs/prow/tree/m
 
 **Authentication** is via a GitHub App called `peribolos-admin`, installed on the pyvista org and scoped to the permissions it needs (team and repository administration, member management). The App's private key is stored as a repo secret and rotated on a schedule. It is the only long-lived credential in the system.
 
+**Apply is branch-gated.** The apply workflow runs only from `main`. Two independent checks enforce this:
+
+1. The apply job is bound to a `production` GitHub Environment (repo **Settings → Environments → production**) whose deployment branch rule is set to `main`. GitHub refuses to start the job on any other ref, including a `workflow_dispatch` triggered from a branch.
+2. `scripts/run-peribolos.sh` refuses apply mode in CI when `GITHUB_REF` is not `refs/heads/main`.
+
+Together these make it impossible for a PR to mutate the live org, even if someone pushes a PR that swaps the dry-run command for apply or rewrites the workflow. The dry-run workflow can still read org state through the App token on PRs, which is required for the preview diff.
+
 **Pre-commit** enforces code quality and security hygiene: [zizmor](https://github.com/zizmorcore/zizmor) for GitHub Actions security, [gitleaks](https://github.com/gitleaks/gitleaks) for secret leaks, [check-jsonschema](https://github.com/python-jsonschema/check-jsonschema) for workflow schema, ruff for the Python script, prettier for YAML/Markdown, codespell for typos.
 
 ---
