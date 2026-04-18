@@ -55,11 +55,17 @@ uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
 # --require-self=false disables peribolos's "ensure the authenticated user
 # is an org admin" check. That check calls GET /user, which GitHub App
 # installation tokens (how CI authenticates) cannot access.
+#
+# --maximum-removal-delta=0.5 loosens the default 0.25 (25%) ceiling on
+# member removals. The initial bootstrap removes ~30% of current members
+# (cleanup of drift + off-boarding tkoyama010 as org owner). Safe to
+# tighten back to 0.25 after the first apply settles the drift.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token
   --min-admins=2
   --require-self=false
+  --maximum-removal-delta=0.5
   --fix-org
   --fix-org-members
   --fix-teams
