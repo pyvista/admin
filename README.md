@@ -21,7 +21,6 @@ collaborators            triage on every public repo
 └── kitware              + write on pyvista and pyvista-xarray (@Kitware folks)
 
 developers               write on every public repo
-├── dev-tools-admin      + admin on typing / mypy plugin repos (user27182)
 ├── maintainers          maintain on every public repo
 │   ├── admin            admin on every repo, sole access to the admin repo
 │   ├── ci-reviewers     mention target for CI review routing, no repo grants
@@ -35,7 +34,7 @@ robots                   write on pyvista (pyvista-bot)
 
 The three broad-access teams (`collaborators`, `developers`, `maintainers`) cover every public repo in the org automatically. They have no `repos:` list in the committed `org.yaml`. Before every peribolos run, `scripts/sync-repos.py` queries the GitHub API for the live set of public repos and expands the config in memory. New repos are picked up by the next daily apply. Archived repos drop off collaborators/developers/maintainers and stay with admin.
 
-The narrower-scope teams list their repos explicitly in `org.yaml`: `kitware`, `pyvistaqt-admin`, `dev-tools-admin`, and `robots`. Those lists are hand-maintained because they express a choice about who should have access to what.
+The narrower-scope teams list their repos explicitly in `org.yaml`: `kitware`, `pyvistaqt-admin`, and `robots`. Those lists are hand-maintained because they express a choice about who should have access to what.
 
 `ci-reviewers` and `leaders` have no repo grants at all. They exist as mention targets (`@pyvista/ci-reviewers`, `@pyvista/leaders`) and to make their members inherit maintainers access via team nesting.
 
