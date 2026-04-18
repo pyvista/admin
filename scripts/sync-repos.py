@@ -57,9 +57,13 @@ ORG_YAML = Path(__file__).resolve().parent.parent / "org.yaml"
 # broad-access teams; their repo lists are fully auto-generated from the live
 # org state. Narrower-scope teams (pyvistaqt-admin, dev-tools-admin, robots)
 # keep their repo lists in the committed org.yaml.
+#
+# developers include the admin repo so anyone with write access to pyvista
+# repos can push branches here and open PRs with a working dry-run. The admin
+# team still holds the admin grant (enforced via CODEOWNERS for merges).
 AUTO_TEAMS: dict[str, tuple[str, bool, bool]] = {
     "collaborators": ("triage", False, False),
-    "developers": ("write", False, False),
+    "developers": ("write", False, True),
     "maintainers": ("maintain", False, False),
     "admin": ("admin", True, True),
 }
@@ -155,7 +159,12 @@ def expand(data: dict, live_repos: list[dict]) -> None:
         if team is None:
             print(f"WARN: team '{team_name}' not found in org.yaml", file=sys.stderr)
             continue
-        team["repos"] = repo_list(live_repos, perm, archived, admin_repo)
+        # Merge auto-expanded repos with any explicit grants in org.yaml.
+        # Explicit entries win so per-team overrides (e.g. developers getting
+        # write on the admin repo) survive expansion.
+        expanded = repo_list(live_repos, perm, archived, admin_repo)
+        existing = team.get("repos") or {}
+        team["repos"] = {**expanded, **existing}
 
 
 def apply_repo_baseline(data: dict, live_repos: list[dict]) -> None:
