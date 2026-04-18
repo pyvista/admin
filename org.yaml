@@ -42,8 +42,6 @@ members:
 - Louis-Pujol
 - MariusCausemann
 - MatthewFlamm
-- mechajeff
-- mkaszynski
 - pyvista-bot
 - tkoyama010
 - user27182
@@ -59,7 +57,6 @@ teams:
     - AlejandroFernandezLuces
     - adeak
     - mkaszynski
-    - mechajeff
     - jbusecke
     privacy: closed
     teams:
