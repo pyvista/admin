@@ -70,17 +70,19 @@ uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
 # tighten back to 0.25 after the first apply settles the drift.
 #
 # --github-hourly-tokens / --github-allowed-burst raise peribolos's
-# client-side throttle. Defaults (300/100) make even idempotent runs take
-# 10+ minutes due to the volume of list calls. GitHub's hard limit for
-# App tokens is 5000/hour; 4000 leaves safety margin.
+# client-side throttle above the default (300/100). 1500/100 stays under
+# GitHub's secondary rate limit for write-heavy workloads (~1500/hr plus
+# per-endpoint burst caps), which the raw primary quota doesn't respect.
+# 4000 tripped the secondary limit and caused 429s on bulk team-repo
+# mutations during the initial restructure.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token
   --min-admins=2
   --require-self=false
   --maximum-removal-delta=0.5
-  --github-hourly-tokens=4000
-  --github-allowed-burst=500
+  --github-hourly-tokens=1500
+  --github-allowed-burst=100
   --fix-org
   --fix-org-members
   --fix-teams
