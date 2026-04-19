@@ -119,10 +119,8 @@ teams:
         repos:
           pyvista-gui: admin
           pyvistaqt: admin
-          pyvistaqt-docs: admin
           pyvistaqt-exe: admin
           setup-headless-display-action: admin
-          vtkjs-viewer: write
   robots:
     description: Automation accounts
     members:
