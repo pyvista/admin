@@ -50,3 +50,45 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: scripts/run-peribolos.sh apply
+
+  notify-failure:
+    needs: peribolos
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open failure issue if none is open
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          label="cron-failure"
+          gh label create "$label" \
+            --repo "$GITHUB_REPOSITORY" \
+            --color B60205 \
+            --description "Scheduled workflow failure" 2>/dev/null || true
+          existing=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --label "$label" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Open issue #$existing already tracks cron failures; skipping."
+            exit 0
+          fi
+          body=$(cat <<EOF
+          The scheduled \`apply\` workflow failed.
+
+          @pyvista/admin — please investigate and close this issue once the cron is green again.
+
+          Latest failing run: $RUN_URL
+          EOF
+          )
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Scheduled \`apply\` workflow is failing" \
+            --label "$label" \
+            --body "$body"
