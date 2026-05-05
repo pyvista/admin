@@ -69,7 +69,7 @@ teams:
         - jspanchu
         privacy: closed
         repos:
-          pyvista: write
+          trame-pyvista: write
           pyvista-xarray: write
   developers:
     description: Developers for the PyVista project and related packages. Write access to every public repo is granted automatically by the repo-sync step of the peribolos workflows. Trusted developers are promoted to the nested maintainers team.
