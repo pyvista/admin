@@ -105,11 +105,47 @@ docker run --rm --platform linux/amd64 \
 EXIT=${PIPESTATUS[0]}
 set -e
 
+# Tolerate the new-team-with-repos case in dry-run.
+#
+# Without --confirm, peribolos does not create teams, so a team that is new
+# in org.yaml has no GitHub ID yet. --fix-team-repos then tries to list that
+# team's repos by ID and GitHub returns 404, which peribolos treats as fatal:
+#
+#   failed to list team 0(<name>) repos: return code not 2XX: 404 Not Found
+#
+# The apply run on main does not hit this: --fix-teams creates the team first,
+# so --fix-team-repos finds it in the same invocation. That makes the failure
+# a dry-run-only artifact, not a real problem with the change. Rather than
+# force a two-PR dance (create team, then a follow-up PR to grant repos), we
+# downgrade this specific failure to a pass and flag it in the summary.
+#
+# Guard: this only triggers when *every* fatal/error line is the benign
+# new-team-repos 404. Any other fatal/error still fails the run.
+TOLERATED=0
+if [[ $MODE == "dry-run" && $EXIT -ne 0 ]]; then
+  PROBLEMS="$(grep -E '"level":"(fatal|error)"' "$LOG_FILE" || true)"
+  BENIGN="$(grep -E '"level":"(fatal|error)"' "$LOG_FILE" |
+    grep -E 'failed to list team [0-9]+\(.+\) repos:.*404' || true)"
+  if [[ -n $PROBLEMS && $PROBLEMS == "$BENIGN" ]]; then
+    EXIT=0
+    TOLERATED=1
+    echo "NOTICE: dry-run hit the new-team-with-repos 404 only; treating as" \
+      "pass. The apply on main creates the team before assigning repos." >&2
+  fi
+fi
+
 # Post a readable dry-run / apply summary to the GitHub Actions job summary.
 # Peribolos logs in JSON; extract level + msg per line for humans.
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
   {
     printf '## peribolos %s\n\n' "$MODE"
+    if [[ $TOLERATED -eq 1 ]]; then
+      printf '> [!WARNING]\n'
+      printf '> A new team in org.yaml has a repos block. peribolos cannot\n'
+      printf '> preview repo grants for a team that does not exist yet, so this\n'
+      printf '> dry-run was downgraded to a pass. The apply on main creates the\n'
+      printf '> team and assigns its repos in one run.\n\n'
+    fi
     if [[ $MODE == "dry-run" ]]; then
       printf 'Changes peribolos _would_ make against the live pyvista org:\n\n'
     else
