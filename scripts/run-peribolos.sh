@@ -26,7 +26,9 @@ if [[ $MODE == "apply" && ${GITHUB_ACTIONS:-} == "true" && ${GITHUB_REF:-} != "r
   exit 1
 fi
 
-PERIBOLOS_IMAGE="us-docker.pkg.dev/k8s-infra-prow/images/peribolos:latest"
+# Pinned by digest for reproducibility and supply-chain integrity. Bump
+# manually after verifying a new digest from the upstream registry.
+PERIBOLOS_IMAGE="us-docker.pkg.dev/k8s-infra-prow/images/peribolos@sha256:6978d5adbb75487cbdb9088eef1437acd8a93a6e75f01abe76c5d0fca853bba8"
 
 if [[ -z ${GITHUB_TOKEN:-} ]]; then
   echo "ERROR: GITHUB_TOKEN environment variable is required." >&2
