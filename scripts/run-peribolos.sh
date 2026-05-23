@@ -26,9 +26,17 @@ if [[ $MODE == "apply" && ${GITHUB_ACTIONS:-} == "true" && ${GITHUB_REF:-} != "r
   exit 1
 fi
 
-# Pinned by digest for reproducibility and supply-chain integrity. Bump
-# manually after verifying a new digest from the upstream registry.
-PERIBOLOS_IMAGE="us-docker.pkg.dev/k8s-infra-prow/images/peribolos@sha256:6978d5adbb75487cbdb9088eef1437acd8a93a6e75f01abe76c5d0fca853bba8"
+# Peribolos image is pinned by digest in docker/peribolos/Dockerfile so
+# Dependabot's `docker` ecosystem (see .github/dependabot.yml) can open PRs
+# when a new digest is available. Parse the FROM line so the digest lives
+# in exactly one place.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PERIBOLOS_DOCKERFILE="$SCRIPT_DIR/../docker/peribolos/Dockerfile"
+PERIBOLOS_IMAGE="$(awk '/^FROM / {print $2; exit}' "$PERIBOLOS_DOCKERFILE")"
+if [[ -z $PERIBOLOS_IMAGE ]]; then
+  echo "ERROR: failed to parse FROM line from $PERIBOLOS_DOCKERFILE" >&2
+  exit 1
+fi
 
 if [[ -z ${GITHUB_TOKEN:-} ]]; then
   echo "ERROR: GITHUB_TOKEN environment variable is required." >&2
