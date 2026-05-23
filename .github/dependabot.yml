@@ -12,3 +12,12 @@ updates:
           - "*"
     commit-message:
       prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: /docker/peribolos
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
