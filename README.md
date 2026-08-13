@@ -69,7 +69,11 @@ Every change flows through a PR.
 
 The dry-run removes guesswork. The reviewer sees _"this PR adds @user to developers and grants her write on 49 repos"_ before the merge happens.
 
+PRs opened from a fork are the one exception. GitHub withholds repository secrets from fork workflow runs, so the App token that the dry-run needs is unavailable and the dry-run step is skipped rather than failed. An admin reproduces the preview by pushing the same branch inside this repo, or locally with `make check`.
+
 A daily cron also runs the apply workflow so that repos created, archived, or deleted on GitHub in between PRs flow into team access without anyone having to open a PR.
+
+Dependabot keeps the pinned Action SHAs and the peribolos image digest current. Those PRs get auto-merge switched on when they open, which means they land on their own once an `@pyvista/admin` reviewer approves and the checks go green — the approval is still required, nothing merges unreviewed.
 
 ## Common tasks
 
@@ -161,7 +165,7 @@ The org is managed by [peribolos](https://github.com/kubernetes-sigs/prow/tree/m
 
 **`scripts/run-peribolos.sh`** is the single entry point for running peribolos. Both GitHub Actions workflows (`dry-run.yml`, `apply.yml`) call it. It runs the sync script, writes App credentials to a temp file, and invokes the peribolos docker image against the expanded config, then posts a readable summary to the Actions job summary so reviewers can see what would change.
 
-**Authentication** is via a GitHub App called `peribolos-admin`, installed on the pyvista org and scoped to the permissions it needs (team and repository administration, member management). The App's private key is stored as a repo secret and rotated on a schedule. It is the only long-lived credential in the system.
+**Authentication** is via a GitHub App called `peribolos-admin`, installed on the pyvista org and scoped to the permissions it needs (team and repository administration, member management). The App's private key is stored as a repo secret and rotated on a schedule. It is the only long-lived credential in the system. It is stored twice, as an Actions secret and as a Dependabot secret, because GitHub hands Dependabot-triggered runs the Dependabot store instead of the Actions one; a rotation that updates only the Actions copy breaks the dry-run on every Dependabot PR.
 
 **Apply is branch-gated.** The apply workflow runs only from `main`. Two independent checks enforce this:
 

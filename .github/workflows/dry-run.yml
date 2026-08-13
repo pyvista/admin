@@ -1,14 +1,20 @@
 name: dry-run
 
 on:
+  # Deliberately no `paths:` filter. `peribolos` (the job below) is a required
+  # status check on main. A workflow that a path filter skips never reports a
+  # status at all, so GitHub parks the PR on "Expected — Waiting for status to
+  # be reported" and it can never merge. That deadlocked the Dependabot digest
+  # bump in #25, which only touches docker/peribolos/Dockerfile. The job takes
+  # about a minute; that is cheaper than an unmergeable PR. Filter at the job
+  # level with `if:` (a skipped job satisfies the check) if this ever needs
+  # narrowing, never at the workflow level.
   pull_request:
-    paths:
-      - org.yaml
-      - scripts/**
-      - .github/workflows/**
   # Re-run for the merge queue so required checks pass on the rebased merge
   # commit before it lands on main.
   merge_group:
+  # Escape hatch: re-run a dry-run without pushing a commit.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,6 +22,14 @@ permissions:
 jobs:
   peribolos:
     runs-on: ubuntu-latest
+    # Fork PRs run with "Secret source: None", so the app-token step below
+    # cannot mint a token and the job would hard-fail with no way for the
+    # contributor to fix it. Skip instead — GitHub counts a skipped job as a
+    # passing required check. A maintainer pushes the branch inside this repo
+    # (or dispatches this workflow on it) to get a real dry-run before merge.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
