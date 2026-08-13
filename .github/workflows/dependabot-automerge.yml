@@ -1,0 +1,37 @@
+name: dependabot-automerge
+
+# Turn on GitHub's native auto-merge for Dependabot PRs as soon as they open.
+#
+# This grants nothing. Auto-merge only queues the PR once every rule in the
+# `protect-main` ruleset is satisfied, which still means a CODEOWNERS review
+# from @pyvista/admin, resolved review threads, and green `pre-commit` and
+# `peribolos` checks. Without this, an approved Dependabot PR sits waiting for
+# a human to click Merge.
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions: {}
+
+jobs:
+  automerge:
+    runs-on: ubuntu-latest
+    # Dependabot never opens PRs from forks, so head-repo equality is a cheap
+    # guard against a fork PR spoofing the actor.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      # Both are needed to call the enablePullRequestAutoMerge mutation.
+      # Workflow runs triggered by Dependabot get a read-only GITHUB_TOKEN
+      # unless a `permissions:` block widens it, which GitHub has honored for
+      # `pull_request` since 2021-10-11.
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"

@@ -6,6 +6,9 @@ on:
     paths:
       - org.yaml
       - scripts/**
+      # A peribolos image bump changes the tool that reconciles the org, so
+      # reconcile once on the new image rather than waiting for the cron.
+      - docker/**
       - .github/workflows/apply.yml
   workflow_dispatch:
   schedule:
