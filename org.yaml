@@ -145,6 +145,21 @@ teams:
 # has_wiki: false, auto-merge, delete branch on merge) applied automatically
 # by scripts/sync-repos.py. Entries here are deliberate per-repo deviations
 # from that baseline. Keep this list short.
+#
+# Peribolos does not treat every key here the same way:
+#   - It enforces has_wiki and the three allow_*_merge keys.
+#   - It applies squash_merge_commit_title and squash_merge_commit_message only
+#     when the repo already needs some other change. A repo deviating on
+#     nothing else keeps its current squash format.
+#   - It has no config field for auto-merge, update-branch,
+#     delete-branch-on-merge or web_commit_signoff_required, and parses config
+#     non-strictly, so those keys are read and discarded. Set them when the
+#     repo is created or fix them by hand.
+# See the README for why, and scripts/sync-repos.py for the lists.
+#
+# Do not add entries for archived repos. GitHub rejects writes to them and
+# peribolos only skips one whose entry says `archived: true`, so anything else
+# fails every apply. scripts/sync-repos.py fails CI if it finds one.
 repos:
   admin:
     web_commit_signoff_required: true

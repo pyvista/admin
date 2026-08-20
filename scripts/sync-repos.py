@@ -26,7 +26,9 @@ This script queries GitHub for the current repo state, then produces an
   their ``repos:`` lists filled in from the live repo list.
 - Every public non-archived repo gets a ``repos:`` entry populated with
   REPO_BASELINE. Any fields present in the committed ``org.yaml`` override
-  the baseline key-by-key.
+  the baseline key-by-key. Peribolos only reads that section when
+  ``scripts/run-peribolos.sh`` passes ``--fix-repos``, and even then it
+  ignores the keys listed in PERIBOLOS_UNSUPPORTED.
 - It then checks membership consistency (no orphan members, no phantom team
   users) and fails fast if the committed config is broken.
 
@@ -72,6 +74,11 @@ ADMIN_REPO = "admin"
 # Baseline settings applied to every public non-archived repo. Anything in the
 # committed org.yaml repos: section overrides these key-by-key. Keeps the
 # committed config focused on real per-repo deviations.
+#
+# Peribolos applies these unevenly: has_wiki and the three allow_*_merge keys
+# drive a change on their own, the two squash_merge_commit_* keys ride along
+# with one, and the rest are records of intent it cannot act on at all. See
+# PERIBOLOS_UNSUPPORTED and PERIBOLOS_PASSENGER_ONLY below.
 REPO_BASELINE: dict[str, object] = {
     "has_wiki": False,
     "allow_merge_commit": False,
@@ -83,6 +90,47 @@ REPO_BASELINE: dict[str, object] = {
     "allow_update_branch": True,
     "delete_branch_on_merge": True,
 }
+
+# Keys peribolos has no config field for. Its repo model (org.Repo in
+# kubernetes-sigs/prow, pkg/config/org/org.go) does not declare them, and
+# config parsing is non-strict (yaml.Unmarshal, not UnmarshalStrict), so an
+# unknown key produces no error at all: it is read and thrown away.
+#
+# The three that REPO_BASELINE sets stay there because they are the org's
+# recorded intent and other tooling reads them. web_commit_signoff_required is
+# not in the baseline at all; it is listed here because org.yaml sets it by
+# hand on the admin repo, where it is equally inert. Set any of them at repo
+# creation time or fix them by hand. warn_unsupported() below prints whichever
+# ones appear in the expanded config on every run, so the gap stays visible
+# instead of looking like it is handled.
+PERIBOLOS_UNSUPPORTED: frozenset[str] = frozenset(
+    {
+        "allow_auto_merge",
+        "allow_update_branch",
+        "delete_branch_on_merge",
+        "web_commit_signoff_required",
+    }
+)
+
+# Keys peribolos parses but only applies as a passenger on some other change.
+#
+# github.RepoRequest.Defined() decides whether peribolos sends the PATCH at
+# all, and it checks eleven fields without including these two. A repo whose
+# only deviation from the baseline is a squash_merge_commit_* value therefore
+# produces a delta that reports itself undefined and is skipped. Let any other
+# managed field drift on that same repo and the next apply sends both keys
+# along in the same request.
+#
+# The practical effect is a split org: repos that needed some other fix get the
+# squash format applied, repos that did not keep whatever they had, and each of
+# those flips silently the first time anything else about them changes. Fixing
+# the stragglers means changing them by hand, not editing this config.
+PERIBOLOS_PASSENGER_ONLY: frozenset[str] = frozenset(
+    {
+        "squash_merge_commit_message",
+        "squash_merge_commit_title",
+    }
+)
 
 
 def _gh_request(url: str, token: str, method: str = "GET") -> urllib.request.Request:
@@ -173,8 +221,14 @@ def apply_repo_baseline(data: dict, live_repos: list[dict]) -> None:
     For each live public non-archived repo, ensure it has an entry in
     ``data['repos']`` with the baseline settings. Any keys already present in
     a committed entry override the baseline. Archived repos are left alone
-    entirely. They are read-only on GitHub and do not need baseline merge
-    rules or wiki settings applied.
+    entirely. GitHub rejects writes to an archived repo, and peribolos only
+    skips one when the config says ``archived: true``, so an entry for an
+    archived repo without that key makes every apply fail.
+
+    Only live repos get an entry, which is half of the guard against
+    peribolos creating repos under ``--fix-repos``. See
+    :func:`prune_dead_repos` for the other half. Entries for archived repos
+    are rejected outright by :func:`check_archived_repos`.
     """
     repos_section = data.setdefault("repos", {})
     for r in live_repos:
@@ -186,13 +240,93 @@ def apply_repo_baseline(data: dict, live_repos: list[dict]) -> None:
         repos_section[name] = merged
 
 
+def warn_unsupported(data: dict) -> tuple[list[str], list[str]]:
+    """Report expanded ``repos:`` keys peribolos will not reliably apply.
+
+    Two separate problems, so they print separately. Keys peribolos has no
+    field for are dropped silently, because it parses config non-strictly.
+    Keys it only applies as a passenger look enforced until a repo needs no
+    other change. Saying both out loud keeps the config from reading as more
+    authoritative than it is.
+    """
+    repos = (data.get("repos") or {}).values()
+    dropped: set[str] = set()
+    passenger: set[str] = set()
+    for settings in repos:
+        dropped.update(PERIBOLOS_UNSUPPORTED.intersection(settings or {}))
+        passenger.update(PERIBOLOS_PASSENGER_ONLY.intersection(settings or {}))
+
+    unsupported, passengers = sorted(dropped), sorted(passenger)
+    if unsupported:
+        print(
+            "\nNOTE: peribolos has no config field for these repo settings and "
+            "discards them:",
+            file=sys.stderr,
+        )
+        for key in unsupported:
+            print(f"  {key}", file=sys.stderr)
+        print(
+            "Set them when the repo is created, or fix them by hand. They stay "
+            "in the config as a record of intent.",
+            file=sys.stderr,
+        )
+    if passengers:
+        print(
+            "\nNOTE: peribolos applies these only when a repo already needs "
+            "another change:",
+            file=sys.stderr,
+        )
+        for key in passengers:
+            print(f"  {key}", file=sys.stderr)
+        print(
+            "A repo that deviates on nothing else keeps its current value. "
+            "Fix those by hand.",
+            file=sys.stderr,
+        )
+    return unsupported, passengers
+
+
 def prune_dead_repos(data: dict, live_names: set[str]) -> list[str]:
-    """Remove entries from the top-level ``repos:`` section that no longer exist."""
+    """Remove entries from the top-level ``repos:`` section that no longer exist.
+
+    Load-bearing under ``--fix-repos``: peribolos creates any repo named in
+    ``repos:`` that is missing from GitHub. Together with
+    :func:`apply_repo_baseline`, which only ever inserts names taken from the
+    live repo list, this keeps the section a subset of what already exists, so
+    a stale or mistyped entry gets dropped rather than turned into a new repo.
+    The guard is those two properties, not the order they run in.
+    """
     repos = data.get("repos", {})
     dead = [name for name in list(repos) if name not in live_names]
     for name in dead:
         del repos[name]
     return dead
+
+
+def prune_archived_repos(data: dict, live_repos: list[dict]) -> list[str]:
+    """Drop ``repos:`` entries for archived repos missing ``archived: true``.
+
+    GitHub rejects writes to an archived repo. Peribolos only leaves one alone
+    when the config says ``archived: true``; otherwise it builds a delta from
+    the baseline and the PATCH fails. Under ``--fix-repos`` that failure aborts
+    the whole run before teams are reconciled, so one stale entry would stop
+    membership syncing entirely.
+
+    Handled the same way as a deleted repo: warn, drop it from the expanded
+    output so the run still completes, and fail only under ``--check`` so the
+    PR that introduced it goes red. ``apply_repo_baseline`` never adds archived
+    repos, so the only way in is a hand-written entry.
+    """
+    archived = {r["name"] for r in live_repos if r["archived"]}
+    repos = data.get("repos") or {}
+    offenders = sorted(
+        name
+        for name, settings in repos.items()
+        if name in archived and not (settings or {}).get("archived")
+    )
+    for name in offenders:
+        del repos[name]
+    return offenders
 
 
 def check_dead_repos(data: dict, live_names: set[str]) -> list[str]:
@@ -277,6 +411,23 @@ def main() -> int:
         if args.check:
             return 1
 
+    archived = prune_archived_repos(data, live_repos)
+    if archived:
+        for name in archived:
+            print(
+                f"WARN: repo '{name}' in org.yaml is archived and its entry "
+                "lacks `archived: true`; dropping it from the expanded config",
+                file=sys.stderr,
+            )
+        print(
+            "GitHub rejects writes to archived repos and peribolos aborts the "
+            "whole run on that failure. Remove the entry, or add "
+            "`archived: true` to it.",
+            file=sys.stderr,
+        )
+        if args.check:
+            return 1
+
     orphans, phantoms = check_membership_consistency(data)
     if orphans or phantoms:
         if orphans:
@@ -306,10 +457,12 @@ def main() -> int:
 
     # Prune dead entries from the expanded output so peribolos doesn't error
     # on them. The committed org.yaml may still reference them; that's a
-    # follow-up cleanup in a PR.
+    # follow-up cleanup in a PR. Under --fix-repos this pruning is also what
+    # keeps peribolos from creating repos; see prune_dead_repos.
     prune_dead_repos(data, live_names)
     apply_repo_baseline(data, live_repos)
     expand(data, live_repos)
+    warn_unsupported(data)
 
     # Peribolos expects config wrapped under orgs.<name>. The committed
     # org.yaml is stored flat for readability (matches what `peribolos --dump`

@@ -50,7 +50,8 @@ fi
 
 CRED_DIR="$(mktemp -d)"
 LOG_FILE="$(mktemp)"
-trap 'rm -rf "$CRED_DIR" "$LOG_FILE"' EXIT
+SYNC_LOG="$(mktemp)"
+trap 'rm -rf "$CRED_DIR" "$LOG_FILE" "$SYNC_LOG"' EXIT
 
 # Write the token to a file peribolos can read.
 printf '%s' "$GITHUB_TOKEN" >"$CRED_DIR/token"
@@ -62,7 +63,32 @@ SYNC_ARGS=(--output org-expanded.yaml)
 if [[ $MODE == "apply" ]]; then
   SYNC_ARGS+=(--remove-outside-collaborators)
 fi
-uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
+# Capture stderr to a file and replay it. It carries the notices about repo
+# settings peribolos cannot enforce and about outside collaborators, which
+# belong in the job summary next to the peribolos diff rather than buried in
+# the raw step log. Redirect rather than tee through a process substitution so
+# the file is complete before the summary reads it.
+set +e
+uv run --quiet scripts/sync-repos.py "${SYNC_ARGS[@]}" 2>"$SYNC_LOG"
+SYNC_EXIT=$?
+set -e
+cat "$SYNC_LOG" >&2
+if [[ $SYNC_EXIT -ne 0 ]]; then
+  # The config errors this prints are the whole reason the run stopped, so
+  # they belong in the summary. The normal summary block below never runs on
+  # this path.
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    {
+      printf '## peribolos %s\n\n' "$MODE"
+      printf '> [!CAUTION]\n'
+      printf '> The sync-repos.py step failed. peribolos did not run.\n\n'
+      printf '```\n'
+      cat "$SYNC_LOG"
+      printf '```\n'
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+  exit "$SYNC_EXIT"
+fi
 
 # Peribolos arguments. Add --confirm only for apply mode.
 #
@@ -85,6 +111,22 @@ uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
 # per-endpoint burst caps), which the raw primary quota doesn't respect.
 # 4000 tripped the secondary limit and caused 429s on bulk team-repo
 # mutations during the initial restructure.
+#
+# --fix-repos gates the entire top-level repos: block. Without it peribolos
+# reads that section and discards it, so REPO_BASELINE in scripts/sync-repos.py
+# was computed on every run and never applied to anything. Note that this flag
+# also lets peribolos *create* any repo named in repos: that does not exist on
+# GitHub. sync-repos.py builds that section from the live repo list and prunes
+# entries whose repo is gone, so the expanded section is always a subset of
+# what already exists. Keep both properties if you touch that script.
+#
+# The flag couples repo reconciliation to everything after it. peribolos runs
+# configureRepos before configureTeams and returns on the first error, so a
+# single failed repo PATCH (transient 5xx, a repo archived or transferred
+# between our GET and the PATCH) aborts the run before team and membership
+# grants are reconciled. Membership then silently stops syncing until someone
+# looks. The scheduled-run failure issue in apply.yml catches the cron case;
+# a push-triggered apply that dies this way opens nothing.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token
@@ -95,6 +137,7 @@ PERIBOLOS_ARGS=(
   --github-allowed-burst=100
   --fix-org
   --fix-org-members
+  --fix-repos
   --fix-teams
   --fix-team-members
   --fix-team-repos
@@ -168,6 +211,12 @@ if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
       cat "$LOG_FILE"
     fi
     printf '```\n'
+    if [[ -s $SYNC_LOG ]]; then
+      printf '\n<details><summary>Config notes from sync-repos.py</summary>\n\n'
+      printf '```\n'
+      cat "$SYNC_LOG"
+      printf '```\n\n</details>\n'
+    fi
   } >>"$GITHUB_STEP_SUMMARY"
 fi
 

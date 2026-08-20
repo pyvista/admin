@@ -105,7 +105,7 @@ Nominating someone else works the same way. Open the PR, tag the person, discuss
 
 Repo creation is restricted to org admins. Open an issue on this repo with the proposed name, what it's for, and why it belongs under `pyvista/`. An admin creates the repo on GitHub once agreed. No PR against `org.yaml` is needed for team access; within 24 hours the daily apply grants `collaborators` triage, `developers` write, `maintainers` maintain, and `admin` admin automatically. An admin can trigger the apply workflow manually to skip the wait.
 
-For custom settings beyond the baseline (branch protection, non-default team grants, specific merge rules), add an entry to the top-level `repos:` section of `org.yaml` via PR. The org baseline (squash-only merges, wikis off, projects off, auto-merge allowed, delete-branch-on-merge) is already covered without a per-repo entry.
+For custom settings beyond the baseline (branch protection, non-default team grants, specific merge rules), add an entry to the top-level `repos:` section of `org.yaml` via PR. The org baseline covers squash-only merges and wikis off without a per-repo entry. Auto-merge, update-branch, delete-branch-on-merge and the squash commit message format are part of the baseline too, but peribolos applies them unreliably or not at all; see [How this works under the hood](#how-this-works-under-the-hood).
 
 ### Archive, transfer, or delete a repository
 
@@ -162,6 +162,18 @@ The org is managed by [peribolos](https://github.com/kubernetes-sigs/prow/tree/m
 2. Applies `REPO_BASELINE` (squash-only merges, wikis off, auto-merge on, delete head branch on merge) to every public non-archived repo. Per-repo entries in committed `org.yaml` override baseline key-by-key.
 3. Runs a consistency audit: no orphan members, no phantom team users. Exits non-zero if the committed config is broken, failing CI before peribolos runs.
 4. On apply, also removes any outside collaborators from the org. Since no `org.yaml` entry lists outside collaborators, every one found is drift.
+
+**Repo settings are only partly enforceable.** Peribolos reads the top-level `repos:` section only when it gets `--fix-repos`, which `run-peribolos.sh` passes. Even then it splits the baseline three ways:
+
+- **Enforced.** `has_wiki`, `allow_squash_merge`, `allow_merge_commit`, `allow_rebase_merge`. A deviation on any of these produces a change on its own.
+- **Applied only as a passenger.** `squash_merge_commit_title` and `squash_merge_commit_message`. Peribolos parses them, but `RepoRequest.Defined()` upstream decides whether to send the update at all and does not look at either field. A repo that deviates on nothing else is skipped and keeps its current value; a repo that needs some other fix gets these rewritten alongside it.
+- **Discarded.** `allow_auto_merge`, `allow_update_branch`, `delete_branch_on_merge`, `web_commit_signoff_required`. Peribolos has no config field for them and parses config non-strictly, so they are read and thrown away with no error.
+
+The passenger keys and the first three discarded keys stay in `REPO_BASELINE` as the org's recorded intent. `web_commit_signoff_required` is not in the baseline; `org.yaml` sets it by hand on the admin repo, where it is equally inert. Set any of them when a repo is created, or fix them by hand. `sync-repos.py` prints both lists on every run and `run-peribolos.sh` folds that output into the job summary, so the gap is visible next to the diff rather than looking handled.
+
+The practical consequence of the passenger case is a split org: squash commit format tracks the baseline on repos that needed some other change and lags on the rest, and a lagging repo flips the first time anything else about it drifts. Closing that gap means touching those repos by hand, not editing this config.
+
+`--fix-repos` also means peribolos creates any repo named in `repos:` that is missing from GitHub. Two properties of `sync-repos.py` keep that from firing: it only ever inserts names taken from the live repo list, and it prunes entries whose repo is gone. The section it hands peribolos is therefore always a subset of what already exists, so a stale or mistyped entry is dropped rather than turned into a new repo.
 
 **`scripts/run-peribolos.sh`** is the single entry point for running peribolos. Both GitHub Actions workflows (`dry-run.yml`, `apply.yml`) call it. It runs the sync script, writes App credentials to a temp file, and invokes the peribolos docker image against the expanded config, then posts a readable summary to the Actions job summary so reviewers can see what would change.
 
