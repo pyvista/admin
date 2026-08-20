@@ -50,7 +50,8 @@ fi
 
 CRED_DIR="$(mktemp -d)"
 LOG_FILE="$(mktemp)"
-trap 'rm -rf "$CRED_DIR" "$LOG_FILE"' EXIT
+SYNC_LOG="$(mktemp)"
+trap 'rm -rf "$CRED_DIR" "$LOG_FILE" "$SYNC_LOG"' EXIT
 
 # Write the token to a file peribolos can read.
 printf '%s' "$GITHUB_TOKEN" >"$CRED_DIR/token"
@@ -62,7 +63,19 @@ SYNC_ARGS=(--output org-expanded.yaml)
 if [[ $MODE == "apply" ]]; then
   SYNC_ARGS+=(--remove-outside-collaborators)
 fi
-uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
+# Capture stderr to a file and replay it. It carries the notices about repo
+# settings peribolos cannot enforce and about outside collaborators, which
+# belong in the job summary next to the peribolos diff rather than buried in
+# the raw step log. Redirect rather than tee through a process substitution so
+# the file is complete before the summary reads it.
+set +e
+uv run scripts/sync-repos.py "${SYNC_ARGS[@]}" 2>"$SYNC_LOG"
+SYNC_EXIT=$?
+set -e
+cat "$SYNC_LOG" >&2
+if [[ $SYNC_EXIT -ne 0 ]]; then
+  exit "$SYNC_EXIT"
+fi
 
 # Peribolos arguments. Add --confirm only for apply mode.
 #
@@ -177,6 +190,12 @@ if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
       cat "$LOG_FILE"
     fi
     printf '```\n'
+    if [[ -s $SYNC_LOG ]]; then
+      printf '\n<details><summary>Config notes from sync-repos.py</summary>\n\n'
+      printf '```\n'
+      cat "$SYNC_LOG"
+      printf '```\n\n</details>\n'
+    fi
   } >>"$GITHUB_STEP_SUMMARY"
 fi
 

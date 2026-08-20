@@ -105,7 +105,7 @@ Nominating someone else works the same way. Open the PR, tag the person, discuss
 
 Repo creation is restricted to org admins. Open an issue on this repo with the proposed name, what it's for, and why it belongs under `pyvista/`. An admin creates the repo on GitHub once agreed. No PR against `org.yaml` is needed for team access; within 24 hours the daily apply grants `collaborators` triage, `developers` write, `maintainers` maintain, and `admin` admin automatically. An admin can trigger the apply workflow manually to skip the wait.
 
-For custom settings beyond the baseline (branch protection, non-default team grants, specific merge rules), add an entry to the top-level `repos:` section of `org.yaml` via PR. The org baseline covers squash-only merges and wikis off without a per-repo entry. Auto-merge, update-branch, delete-branch-on-merge and the squash commit message format are part of the baseline too, but peribolos cannot apply them; see [How this works under the hood](#how-this-works-under-the-hood).
+For custom settings beyond the baseline (branch protection, non-default team grants, specific merge rules), add an entry to the top-level `repos:` section of `org.yaml` via PR. The org baseline covers squash-only merges and wikis off without a per-repo entry. Auto-merge, update-branch, delete-branch-on-merge and the squash commit message format are part of the baseline too, but peribolos applies them unreliably or not at all; see [How this works under the hood](#how-this-works-under-the-hood).
 
 ### Archive, transfer, or delete a repository
 
@@ -163,9 +163,15 @@ The org is managed by [peribolos](https://github.com/kubernetes-sigs/prow/tree/m
 3. Runs a consistency audit: no orphan members, no phantom team users. Exits non-zero if the committed config is broken, failing CI before peribolos runs.
 4. On apply, also removes any outside collaborators from the org. Since no `org.yaml` entry lists outside collaborators, every one found is drift.
 
-**Repo settings are only partly enforceable.** Peribolos reads the top-level `repos:` section only when it gets `--fix-repos`, which `run-peribolos.sh` passes. Of the settings `REPO_BASELINE` sets, the pinned peribolos enforces exactly four: `has_wiki`, `allow_squash_merge`, `allow_merge_commit` and `allow_rebase_merge`. It has no config field for `allow_auto_merge`, `allow_update_branch`, `delete_branch_on_merge`, `squash_merge_commit_title`, `squash_merge_commit_message` or `web_commit_signoff_required`, and it parses config non-strictly, so those six keys are read and discarded with no error. They stay in `REPO_BASELINE` as the org's recorded intent; set them when a repo is created, or fix them by hand. `sync-repos.py` prints the list on every run so the gap shows up in the job summary.
+**Repo settings are only partly enforceable.** Peribolos reads the top-level `repos:` section only when it gets `--fix-repos`, which `run-peribolos.sh` passes. Even then it splits the baseline three ways:
 
-That list is tied to the image digest in `docker/peribolos/Dockerfile`. Upstream has since added the two `squash_merge_commit_*` fields, so a Dependabot digest bump can turn them on. 54 repos currently disagree with the baseline on `squash_merge_commit_message`, and they would all change on the first apply after such a bump. Read the dry-run diff on digest bumps, not just on config changes.
+- **Enforced.** `has_wiki`, `allow_squash_merge`, `allow_merge_commit`, `allow_rebase_merge`. A deviation on any of these produces a change on its own.
+- **Applied only as a passenger.** `squash_merge_commit_title` and `squash_merge_commit_message`. Peribolos parses them, but `RepoRequest.Defined()` upstream decides whether to send the update at all and does not look at either field. A repo that deviates on nothing else is skipped and keeps its current value; a repo that needs some other fix gets these rewritten alongside it.
+- **Discarded.** `allow_auto_merge`, `allow_update_branch`, `delete_branch_on_merge`, `web_commit_signoff_required`. Peribolos has no config field for them and parses config non-strictly, so they are read and thrown away with no error.
+
+The last two groups stay in `REPO_BASELINE` as the org's recorded intent. Set them when a repo is created, or fix them by hand. `sync-repos.py` prints both lists on every run and `run-peribolos.sh` folds that output into the job summary, so the gap is visible next to the diff rather than looking handled.
+
+The practical consequence of the passenger case is a split org: squash commit format tracks the baseline on repos that needed some other change and lags on the rest, and a lagging repo flips the first time anything else about it drifts. Closing that gap means touching those repos by hand, not editing this config.
 
 `--fix-repos` also means peribolos creates any repo named in `repos:` that is missing from GitHub. That section is generated from the live repo list and stale entries are pruned before it is filled, so it never names a repo that does not already exist. The pruning runs first for exactly this reason.
 

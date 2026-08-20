@@ -75,9 +75,10 @@ ADMIN_REPO = "admin"
 # committed org.yaml repos: section overrides these key-by-key. Keeps the
 # committed config focused on real per-repo deviations.
 #
-# Only has_wiki and the three allow_*_merge keys are enforceable today. The
-# rest are records of org intent that peribolos cannot act on; see
-# PERIBOLOS_UNSUPPORTED below.
+# Peribolos applies these unevenly: has_wiki and the three allow_*_merge keys
+# drive a change on their own, the two squash_merge_commit_* keys ride along
+# with one, and the rest are records of intent it cannot act on at all. See
+# PERIBOLOS_UNSUPPORTED and PERIBOLOS_PASSENGER_ONLY below.
 REPO_BASELINE: dict[str, object] = {
     "has_wiki": False,
     "allow_merge_commit": False,
@@ -90,32 +91,41 @@ REPO_BASELINE: dict[str, object] = {
     "delete_branch_on_merge": True,
 }
 
-# Keys the pinned peribolos silently drops. Its config model (org.Repo in
-# kubernetes-sigs/prow, pkg/config/org/org.go) has no field for them, and
+# Keys peribolos has no config field for. Its repo model (org.Repo in
+# kubernetes-sigs/prow, pkg/config/org/org.go) does not declare them, and
 # config parsing is non-strict (yaml.Unmarshal, not UnmarshalStrict), so an
 # unknown key produces no error at all: it is read and thrown away.
 #
-# This list is tied to the image digest in docker/peribolos/Dockerfile, not to
-# peribolos in general. Upstream has since added squash_merge_commit_title and
-# squash_merge_commit_message to org.Repo, so a Dependabot digest bump can make
-# those two enforceable. That matters: 54 repos currently disagree with the
-# baseline on squash_merge_commit_message, and they would all change on the
-# first apply after such a bump. Re-check after any bump by pointing peribolos
-# at a two-repo config where one repo's only deviation is the key under test,
-# and see whether the dry-run logs an UpdateRepo for it.
-#
 # These stay in REPO_BASELINE because they are the org's recorded intent and
 # other tooling reads them. Set them at repo creation time or fix them by hand.
-# warn_unsupported() below prints them on every run so the gap stays visible in
-# the job summary instead of looking like it is handled.
+# warn_unsupported() below prints them on every run so the gap stays visible
+# instead of looking like it is handled.
 PERIBOLOS_UNSUPPORTED: frozenset[str] = frozenset(
     {
         "allow_auto_merge",
         "allow_update_branch",
         "delete_branch_on_merge",
+        "web_commit_signoff_required",
+    }
+)
+
+# Keys peribolos parses but only applies as a passenger on some other change.
+#
+# github.RepoRequest.Defined() decides whether peribolos sends the PATCH at
+# all, and it checks eleven fields without including these two. A repo whose
+# only deviation from the baseline is a squash_merge_commit_* value therefore
+# produces a delta that reports itself undefined and is skipped. Let any other
+# managed field drift on that same repo and the next apply sends both keys
+# along in the same request.
+#
+# The practical effect is a split org: repos that needed some other fix get the
+# squash format applied, repos that did not keep whatever they had, and each of
+# those flips silently the first time anything else about them changes. Fixing
+# the stragglers means changing them by hand, not editing this config.
+PERIBOLOS_PASSENGER_ONLY: frozenset[str] = frozenset(
+    {
         "squash_merge_commit_message",
         "squash_merge_commit_title",
-        "web_commit_signoff_required",
     }
 )
 
@@ -214,7 +224,8 @@ def apply_repo_baseline(data: dict, live_repos: list[dict]) -> None:
 
     Only live repos get an entry, which is half of the guard against
     peribolos creating repos under ``--fix-repos``. See
-    :func:`prune_dead_repos` for the other half.
+    :func:`prune_dead_repos` for the other half. Entries for archived repos
+    are rejected outright by :func:`check_archived_repos`.
     """
     repos_section = data.setdefault("repos", {})
     for r in live_repos:
@@ -226,21 +237,27 @@ def apply_repo_baseline(data: dict, live_repos: list[dict]) -> None:
         repos_section[name] = merged
 
 
-def warn_unsupported(data: dict) -> list[str]:
-    """Report expanded ``repos:`` keys that peribolos will read and discard.
+def warn_unsupported(data: dict) -> tuple[list[str], list[str]]:
+    """Report expanded ``repos:`` keys peribolos will not reliably apply.
 
-    Peribolos parses its config non-strictly, so a key outside its repo model
-    is dropped without any error. Print the offenders so a run that cannot
-    enforce part of the baseline says so out loud.
+    Two separate problems, so they print separately. Keys peribolos has no
+    field for are dropped silently, because it parses config non-strictly.
+    Keys it only applies as a passenger look enforced until a repo needs no
+    other change. Saying both out loud keeps the config from reading as more
+    authoritative than it is.
     """
-    found: set[str] = set()
-    for settings in (data.get("repos") or {}).values():
-        found.update(PERIBOLOS_UNSUPPORTED.intersection(settings or {}))
-    unsupported = sorted(found)
+    repos = (data.get("repos") or {}).values()
+    dropped: set[str] = set()
+    passenger: set[str] = set()
+    for settings in repos:
+        dropped.update(PERIBOLOS_UNSUPPORTED.intersection(settings or {}))
+        passenger.update(PERIBOLOS_PASSENGER_ONLY.intersection(settings or {}))
+
+    unsupported, passengers = sorted(dropped), sorted(passenger)
     if unsupported:
         print(
-            "\nNOTE: peribolos cannot enforce these repo settings and will "
-            "ignore them:",
+            "\nNOTE: peribolos has no config field for these repo settings and "
+            "discards them:",
             file=sys.stderr,
         )
         for key in unsupported:
@@ -250,23 +267,55 @@ def warn_unsupported(data: dict) -> list[str]:
             "in the config as a record of intent.",
             file=sys.stderr,
         )
-    return unsupported
+    if passengers:
+        print(
+            "\nNOTE: peribolos applies these only when a repo already needs "
+            "another change:",
+            file=sys.stderr,
+        )
+        for key in passengers:
+            print(f"  {key}", file=sys.stderr)
+        print(
+            "A repo that deviates on nothing else keeps its current value. "
+            "Fix those by hand.",
+            file=sys.stderr,
+        )
+    return unsupported, passengers
 
 
 def prune_dead_repos(data: dict, live_names: set[str]) -> list[str]:
     """Remove entries from the top-level ``repos:`` section that no longer exist.
 
     Load-bearing under ``--fix-repos``: peribolos creates any repo named in
-    ``repos:`` that is missing from GitHub. Pruning first, then filling the
-    section from the live repo list, keeps it a subset of what already exists,
-    so a stale or mistyped entry gets dropped rather than turned into a new
-    repo. Do not reorder these two steps.
+    ``repos:`` that is missing from GitHub. Together with
+    :func:`apply_repo_baseline`, which only ever inserts names taken from the
+    live repo list, this keeps the section a subset of what already exists, so
+    a stale or mistyped entry gets dropped rather than turned into a new repo.
+    The guard is those two properties, not the order they run in.
     """
     repos = data.get("repos", {})
     dead = [name for name in list(repos) if name not in live_names]
     for name in dead:
         del repos[name]
     return dead
+
+
+def check_archived_repos(data: dict, live_repos: list[dict]) -> list[str]:
+    """Return committed ``repos:`` entries for archived repos missing ``archived: true``.
+
+    GitHub rejects writes to an archived repo. Peribolos only leaves one alone
+    when the config says ``archived: true``; otherwise it builds a delta from
+    the baseline and the PATCH fails, which breaks the daily apply until
+    someone notices. ``apply_repo_baseline`` never adds archived repos, so the
+    only way in is a hand-written entry. Catch it on the PR instead.
+    """
+    archived = {r["name"] for r in live_repos if r["archived"]}
+    offenders = [
+        name
+        for name, settings in (data.get("repos") or {}).items()
+        if name in archived and not (settings or {}).get("archived")
+    ]
+    return sorted(offenders)
 
 
 def check_dead_repos(data: dict, live_names: set[str]) -> list[str]:
@@ -350,6 +399,24 @@ def main() -> int:
             )
         if args.check:
             return 1
+
+    # Hard error, not a warning: peribolos would PATCH these and GitHub would
+    # reject it, breaking every apply until someone edits org.yaml.
+    archived = check_archived_repos(data, live_repos)
+    if archived:
+        print(
+            "\nERROR: org.yaml has repos: entries for archived repos without "
+            "`archived: true`:",
+            file=sys.stderr,
+        )
+        for name in archived:
+            print(f"  {name}", file=sys.stderr)
+        print(
+            "GitHub rejects writes to archived repos, so peribolos fails on "
+            "every apply. Remove the entry, or add `archived: true` to it.",
+            file=sys.stderr,
+        )
+        return 1
 
     orphans, phantoms = check_membership_consistency(data)
     if orphans or phantoms:
