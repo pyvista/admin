@@ -69,11 +69,24 @@ fi
 # the raw step log. Redirect rather than tee through a process substitution so
 # the file is complete before the summary reads it.
 set +e
-uv run scripts/sync-repos.py "${SYNC_ARGS[@]}" 2>"$SYNC_LOG"
+uv run --quiet scripts/sync-repos.py "${SYNC_ARGS[@]}" 2>"$SYNC_LOG"
 SYNC_EXIT=$?
 set -e
 cat "$SYNC_LOG" >&2
 if [[ $SYNC_EXIT -ne 0 ]]; then
+  # The config errors this prints are the whole reason the run stopped, so
+  # they belong in the summary. The normal summary block below never runs on
+  # this path.
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    {
+      printf '## peribolos %s\n\n' "$MODE"
+      printf '> [!CAUTION]\n'
+      printf '> The sync-repos.py step failed. peribolos did not run.\n\n'
+      printf '```\n'
+      cat "$SYNC_LOG"
+      printf '```\n'
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
   exit "$SYNC_EXIT"
 fi
 
@@ -106,6 +119,14 @@ fi
 # GitHub. sync-repos.py builds that section from the live repo list and prunes
 # entries whose repo is gone, so the expanded section is always a subset of
 # what already exists. Keep both properties if you touch that script.
+#
+# The flag couples repo reconciliation to everything after it. peribolos runs
+# configureRepos before configureTeams and returns on the first error, so a
+# single failed repo PATCH (transient 5xx, a repo archived or transferred
+# between our GET and the PATCH) aborts the run before team and membership
+# grants are reconciled. Membership then silently stops syncing until someone
+# looks. The scheduled-run failure issue in apply.yml catches the cron case;
+# a push-triggered apply that dies this way opens nothing.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token

@@ -96,9 +96,12 @@ REPO_BASELINE: dict[str, object] = {
 # config parsing is non-strict (yaml.Unmarshal, not UnmarshalStrict), so an
 # unknown key produces no error at all: it is read and thrown away.
 #
-# These stay in REPO_BASELINE because they are the org's recorded intent and
-# other tooling reads them. Set them at repo creation time or fix them by hand.
-# warn_unsupported() below prints them on every run so the gap stays visible
+# The three that REPO_BASELINE sets stay there because they are the org's
+# recorded intent and other tooling reads them. web_commit_signoff_required is
+# not in the baseline at all; it is listed here because org.yaml sets it by
+# hand on the admin repo, where it is equally inert. Set any of them at repo
+# creation time or fix them by hand. warn_unsupported() below prints whichever
+# ones appear in the expanded config on every run, so the gap stays visible
 # instead of looking like it is handled.
 PERIBOLOS_UNSUPPORTED: frozenset[str] = frozenset(
     {
@@ -300,22 +303,30 @@ def prune_dead_repos(data: dict, live_names: set[str]) -> list[str]:
     return dead
 
 
-def check_archived_repos(data: dict, live_repos: list[dict]) -> list[str]:
-    """Return committed ``repos:`` entries for archived repos missing ``archived: true``.
+def prune_archived_repos(data: dict, live_repos: list[dict]) -> list[str]:
+    """Drop ``repos:`` entries for archived repos missing ``archived: true``.
 
     GitHub rejects writes to an archived repo. Peribolos only leaves one alone
     when the config says ``archived: true``; otherwise it builds a delta from
-    the baseline and the PATCH fails, which breaks the daily apply until
-    someone notices. ``apply_repo_baseline`` never adds archived repos, so the
-    only way in is a hand-written entry. Catch it on the PR instead.
+    the baseline and the PATCH fails. Under ``--fix-repos`` that failure aborts
+    the whole run before teams are reconciled, so one stale entry would stop
+    membership syncing entirely.
+
+    Handled the same way as a deleted repo: warn, drop it from the expanded
+    output so the run still completes, and fail only under ``--check`` so the
+    PR that introduced it goes red. ``apply_repo_baseline`` never adds archived
+    repos, so the only way in is a hand-written entry.
     """
     archived = {r["name"] for r in live_repos if r["archived"]}
-    offenders = [
+    repos = data.get("repos") or {}
+    offenders = sorted(
         name
-        for name, settings in (data.get("repos") or {}).items()
+        for name, settings in repos.items()
         if name in archived and not (settings or {}).get("archived")
-    ]
-    return sorted(offenders)
+    )
+    for name in offenders:
+        del repos[name]
+    return offenders
 
 
 def check_dead_repos(data: dict, live_names: set[str]) -> list[str]:
@@ -400,23 +411,22 @@ def main() -> int:
         if args.check:
             return 1
 
-    # Hard error, not a warning: peribolos would PATCH these and GitHub would
-    # reject it, breaking every apply until someone edits org.yaml.
-    archived = check_archived_repos(data, live_repos)
+    archived = prune_archived_repos(data, live_repos)
     if archived:
-        print(
-            "\nERROR: org.yaml has repos: entries for archived repos without "
-            "`archived: true`:",
-            file=sys.stderr,
-        )
         for name in archived:
-            print(f"  {name}", file=sys.stderr)
+            print(
+                f"WARN: repo '{name}' in org.yaml is archived and its entry "
+                "lacks `archived: true`; dropping it from the expanded config",
+                file=sys.stderr,
+            )
         print(
-            "GitHub rejects writes to archived repos, so peribolos fails on "
-            "every apply. Remove the entry, or add `archived: true` to it.",
+            "GitHub rejects writes to archived repos and peribolos aborts the "
+            "whole run on that failure. Remove the entry, or add "
+            "`archived: true` to it.",
             file=sys.stderr,
         )
-        return 1
+        if args.check:
+            return 1
 
     orphans, phantoms = check_membership_consistency(data)
     if orphans or phantoms:
@@ -447,8 +457,8 @@ def main() -> int:
 
     # Prune dead entries from the expanded output so peribolos doesn't error
     # on them. The committed org.yaml may still reference them; that's a
-    # follow-up cleanup in a PR. Under --fix-repos this ordering also keeps
-    # peribolos from creating repos; see prune_dead_repos.
+    # follow-up cleanup in a PR. Under --fix-repos this pruning is also what
+    # keeps peribolos from creating repos; see prune_dead_repos.
     prune_dead_repos(data, live_names)
     apply_repo_baseline(data, live_repos)
     expand(data, live_repos)
