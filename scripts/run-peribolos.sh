@@ -105,7 +105,7 @@ fi
 # also lets peribolos *create* any repo named in repos: that does not exist on
 # GitHub. sync-repos.py builds that section from the live repo list and prunes
 # entries whose repo is gone, so the expanded section is always a subset of
-# what already exists. Keep it that way.
+# what already exists. Keep both properties if you touch that script.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token

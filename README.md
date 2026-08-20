@@ -173,7 +173,7 @@ The last two groups stay in `REPO_BASELINE` as the org's recorded intent. Set th
 
 The practical consequence of the passenger case is a split org: squash commit format tracks the baseline on repos that needed some other change and lags on the rest, and a lagging repo flips the first time anything else about it drifts. Closing that gap means touching those repos by hand, not editing this config.
 
-`--fix-repos` also means peribolos creates any repo named in `repos:` that is missing from GitHub. That section is generated from the live repo list and stale entries are pruned before it is filled, so it never names a repo that does not already exist. The pruning runs first for exactly this reason.
+`--fix-repos` also means peribolos creates any repo named in `repos:` that is missing from GitHub. Two properties of `sync-repos.py` keep that from firing: it only ever inserts names taken from the live repo list, and it prunes entries whose repo is gone. The section it hands peribolos is therefore always a subset of what already exists, so a stale or mistyped entry is dropped rather than turned into a new repo.
 
 **`scripts/run-peribolos.sh`** is the single entry point for running peribolos. Both GitHub Actions workflows (`dry-run.yml`, `apply.yml`) call it. It runs the sync script, writes App credentials to a temp file, and invokes the peribolos docker image against the expanded config, then posts a readable summary to the Actions job summary so reviewers can see what would change.
 
