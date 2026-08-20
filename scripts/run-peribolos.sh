@@ -85,6 +85,14 @@ uv run scripts/sync-repos.py "${SYNC_ARGS[@]}"
 # per-endpoint burst caps), which the raw primary quota doesn't respect.
 # 4000 tripped the secondary limit and caused 429s on bulk team-repo
 # mutations during the initial restructure.
+#
+# --fix-repos gates the entire top-level repos: block. Without it peribolos
+# reads that section and discards it, so REPO_BASELINE in scripts/sync-repos.py
+# was computed on every run and never applied to anything. Note that this flag
+# also lets peribolos *create* any repo named in repos: that does not exist on
+# GitHub. sync-repos.py builds that section from the live repo list and prunes
+# entries whose repo is gone, so the expanded section is always a subset of
+# what already exists. Keep it that way.
 PERIBOLOS_ARGS=(
   --config-path=org-expanded.yaml
   --github-token-path=/etc/github/token
@@ -95,6 +103,7 @@ PERIBOLOS_ARGS=(
   --github-allowed-burst=100
   --fix-org
   --fix-org-members
+  --fix-repos
   --fix-teams
   --fix-team-members
   --fix-team-repos

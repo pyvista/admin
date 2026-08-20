@@ -26,7 +26,9 @@ This script queries GitHub for the current repo state, then produces an
   their ``repos:`` lists filled in from the live repo list.
 - Every public non-archived repo gets a ``repos:`` entry populated with
   REPO_BASELINE. Any fields present in the committed ``org.yaml`` override
-  the baseline key-by-key.
+  the baseline key-by-key. Peribolos only reads that section when
+  ``scripts/run-peribolos.sh`` passes ``--fix-repos``, and even then it
+  ignores the keys listed in PERIBOLOS_UNSUPPORTED.
 - It then checks membership consistency (no orphan members, no phantom team
   users) and fails fast if the committed config is broken.
 
@@ -72,6 +74,10 @@ ADMIN_REPO = "admin"
 # Baseline settings applied to every public non-archived repo. Anything in the
 # committed org.yaml repos: section overrides these key-by-key. Keeps the
 # committed config focused on real per-repo deviations.
+#
+# Only has_wiki and the three allow_*_merge keys are enforceable today. The
+# rest are records of org intent that peribolos cannot act on; see
+# PERIBOLOS_UNSUPPORTED below.
 REPO_BASELINE: dict[str, object] = {
     "has_wiki": False,
     "allow_merge_commit": False,
@@ -83,6 +89,35 @@ REPO_BASELINE: dict[str, object] = {
     "allow_update_branch": True,
     "delete_branch_on_merge": True,
 }
+
+# Keys the pinned peribolos silently drops. Its config model (org.Repo in
+# kubernetes-sigs/prow, pkg/config/org/org.go) has no field for them, and
+# config parsing is non-strict (yaml.Unmarshal, not UnmarshalStrict), so an
+# unknown key produces no error at all: it is read and thrown away.
+#
+# This list is tied to the image digest in docker/peribolos/Dockerfile, not to
+# peribolos in general. Upstream has since added squash_merge_commit_title and
+# squash_merge_commit_message to org.Repo, so a Dependabot digest bump can make
+# those two enforceable. That matters: 54 repos currently disagree with the
+# baseline on squash_merge_commit_message, and they would all change on the
+# first apply after such a bump. Re-check after any bump by pointing peribolos
+# at a two-repo config where one repo's only deviation is the key under test,
+# and see whether the dry-run logs an UpdateRepo for it.
+#
+# These stay in REPO_BASELINE because they are the org's recorded intent and
+# other tooling reads them. Set them at repo creation time or fix them by hand.
+# warn_unsupported() below prints them on every run so the gap stays visible in
+# the job summary instead of looking like it is handled.
+PERIBOLOS_UNSUPPORTED: frozenset[str] = frozenset(
+    {
+        "allow_auto_merge",
+        "allow_update_branch",
+        "delete_branch_on_merge",
+        "squash_merge_commit_message",
+        "squash_merge_commit_title",
+        "web_commit_signoff_required",
+    }
+)
 
 
 def _gh_request(url: str, token: str, method: str = "GET") -> urllib.request.Request:
@@ -173,8 +208,13 @@ def apply_repo_baseline(data: dict, live_repos: list[dict]) -> None:
     For each live public non-archived repo, ensure it has an entry in
     ``data['repos']`` with the baseline settings. Any keys already present in
     a committed entry override the baseline. Archived repos are left alone
-    entirely. They are read-only on GitHub and do not need baseline merge
-    rules or wiki settings applied.
+    entirely. GitHub rejects writes to an archived repo, and peribolos only
+    skips one when the config says ``archived: true``, so an entry for an
+    archived repo without that key makes every apply fail.
+
+    Only live repos get an entry, which is half of the guard against
+    peribolos creating repos under ``--fix-repos``. See
+    :func:`prune_dead_repos` for the other half.
     """
     repos_section = data.setdefault("repos", {})
     for r in live_repos:
@@ -186,8 +226,42 @@ def apply_repo_baseline(data: dict, live_repos: list[dict]) -> None:
         repos_section[name] = merged
 
 
+def warn_unsupported(data: dict) -> list[str]:
+    """Report expanded ``repos:`` keys that peribolos will read and discard.
+
+    Peribolos parses its config non-strictly, so a key outside its repo model
+    is dropped without any error. Print the offenders so a run that cannot
+    enforce part of the baseline says so out loud.
+    """
+    found: set[str] = set()
+    for settings in (data.get("repos") or {}).values():
+        found.update(PERIBOLOS_UNSUPPORTED.intersection(settings or {}))
+    unsupported = sorted(found)
+    if unsupported:
+        print(
+            "\nNOTE: peribolos cannot enforce these repo settings and will "
+            "ignore them:",
+            file=sys.stderr,
+        )
+        for key in unsupported:
+            print(f"  {key}", file=sys.stderr)
+        print(
+            "Set them when the repo is created, or fix them by hand. They stay "
+            "in the config as a record of intent.",
+            file=sys.stderr,
+        )
+    return unsupported
+
+
 def prune_dead_repos(data: dict, live_names: set[str]) -> list[str]:
-    """Remove entries from the top-level ``repos:`` section that no longer exist."""
+    """Remove entries from the top-level ``repos:`` section that no longer exist.
+
+    Load-bearing under ``--fix-repos``: peribolos creates any repo named in
+    ``repos:`` that is missing from GitHub. Pruning first, then filling the
+    section from the live repo list, keeps it a subset of what already exists,
+    so a stale or mistyped entry gets dropped rather than turned into a new
+    repo. Do not reorder these two steps.
+    """
     repos = data.get("repos", {})
     dead = [name for name in list(repos) if name not in live_names]
     for name in dead:
@@ -306,10 +380,12 @@ def main() -> int:
 
     # Prune dead entries from the expanded output so peribolos doesn't error
     # on them. The committed org.yaml may still reference them; that's a
-    # follow-up cleanup in a PR.
+    # follow-up cleanup in a PR. Under --fix-repos this ordering also keeps
+    # peribolos from creating repos; see prune_dead_repos.
     prune_dead_repos(data, live_names)
     apply_repo_baseline(data, live_repos)
     expand(data, live_repos)
+    warn_unsupported(data)
 
     # Peribolos expects config wrapped under orgs.<name>. The committed
     # org.yaml is stored flat for readability (matches what `peribolos --dump`
