@@ -103,7 +103,15 @@ Nominating someone else works the same way. Open the PR, tag the person, discuss
 
 ### Add a new repository to the organization
 
-Repo creation is restricted to org admins. Open an issue on this repo with the proposed name, what it's for, and why it belongs under `pyvista/`. An admin creates the repo on GitHub once agreed. No PR against `org.yaml` is needed for team access; within 24 hours the daily apply grants `collaborators` triage, `developers` write, `maintainers` maintain, and `admin` admin automatically. An admin can trigger the apply workflow manually to skip the wait.
+Open a [**New repository**](https://github.com/pyvista/admin/issues/new?template=new-repository.yml) issue. The form asks for the name, a one-line description, why it belongs under `pyvista/`, and whether it needs a `release` environment for PyPI trusted publishing.
+
+Filing the form starts a workflow that validates the request and then waits. An `@pyvista/admin` member approves the pending deployment, and the repository is created: org baseline settings applied, `release` environment added if requested, and the `apply` workflow triggered so `collaborators` get triage, `developers` write, `maintainers` maintain, and `admin` admin within a minute or two. The bot comments the link and closes the issue.
+
+Nothing is created before an admin approves. If validation fails, the bot says why on the issue; fix the body, then remove and re-add the `new-repository` label to retry.
+
+The repository is created empty so you can push existing history straight into it. [`pyvista/pyvista-manifold`](https://github.com/pyvista/pyvista-manifold) is the reference layout for a new ecosystem package.
+
+Org membership is a prerequisite, since the workflow checks it. Repo creation stays off for members generally (`members_can_create_repositories: false`); this workflow is the sanctioned path, and every request leaves an issue and a deployment record behind it.
 
 For custom settings beyond the baseline (branch protection, non-default team grants, specific merge rules), add an entry to the top-level `repos:` section of `org.yaml` via PR. The org baseline covers squash-only merges and wikis off without a per-repo entry. Auto-merge, update-branch, delete-branch-on-merge and the squash commit message format are part of the baseline too, but peribolos applies them unreliably or not at all; see [How this works under the hood](#how-this-works-under-the-hood).
 
@@ -185,6 +193,12 @@ The practical consequence of the passenger case is a split org: squash commit fo
 2. `scripts/run-peribolos.sh` refuses apply mode in CI when `GITHUB_REF` is not `refs/heads/main`.
 
 Together these make it impossible for a PR to mutate the live org, even if someone pushes a PR that swaps the dry-run command for apply or rewrites the workflow. The dry-run workflow can still read org state through the App token on PRs, which is required for the preview diff.
+
+**Repo creation is approval-gated, not admin-only.** `.github/workflows/new-repository.yml` turns a **New repository** issue form into a created repo. The `validate` job parses the form, confirms the requester is an org member, and checks the name is free, all with a read-only App token so a bad request cannot touch anything. The `create` job is bound to a `repo-creation` GitHub Environment whose required reviewer is `@pyvista/admin`, so it sits in "waiting for approval" until an admin clicks through. Only then does it mint a write-scoped App token, create the repo, apply `NEW_REPO_SETTINGS` from `scripts/repo_settings.py`, add the `release` environment if asked, and dispatch `apply.yml` so team access lands immediately instead of on the next daily cron.
+
+The `repo-creation` environment is the entire approval gate, and it is configured in the GitHub UI rather than in this repo. If it is deleted, or its required reviewers are cleared, the `create` job runs unattended on any labeled issue. Set it up under **Settings → Environments → New environment** as `repo-creation`, with `@pyvista/admin` as a required reviewer and deployment branches limited to `main`.
+
+The issue body is attacker-controlled text: anyone can open an issue on a public repo. It reaches the script through a file, never a shell interpolation. Both jobs fetch it from the API rather than reading the webhook payload, which is frozen at the moment the run started; otherwise a request could be edited to read innocuously on the issue an admin approves while the original text is what gets built. The `create` job re-validates the fetched body and refuses if the requested name no longer matches what was approved. Only the first occurrence of each form heading counts, so a second `### Repository name` hidden in an HTML comment inside a free-text field cannot override the name shown on the issue.
 
 **Pre-commit** enforces code quality and security hygiene: [zizmor](https://github.com/zizmorcore/zizmor) for GitHub Actions security, [gitleaks](https://github.com/gitleaks/gitleaks) for secret leaks, [check-jsonschema](https://github.com/python-jsonschema/check-jsonschema) for workflow schema, ruff for the Python script, prettier for YAML/Markdown, codespell for typos.
 

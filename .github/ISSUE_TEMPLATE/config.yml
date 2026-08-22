@@ -1,0 +1,10 @@
+# Everything else the README points people at is a free-form issue, so keep the
+# blank template available alongside the New repository form.
+blank_issues_enabled: true
+contact_links:
+  - name: General pyvista question
+    url: https://github.com/pyvista/pyvista/discussions
+    about: Usage questions and general discussion happen in the main repo's discussions.
+  - name: Security vulnerability
+    url: https://github.com/pyvista/admin/security/policy
+    about: Report privately through the Security tab of the affected repo, never as a public issue.

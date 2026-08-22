@@ -1,0 +1,213 @@
+name: new-repository
+
+# Creates a repo from a "New repository" issue form, gated on an admin
+# approving the `repo-creation` environment deployment.
+#
+# One-time setup (repo Settings → Environments → New environment):
+#   name: repo-creation
+#   Required reviewers: @pyvista/admin
+#   Deployment branches: main only
+# Without required reviewers on that environment the `create` job runs
+# unattended, which defeats the point. See the README.
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight validation per issue. Cancelling here is safe: this group
+  # covers only the pre-approval job, which mutates nothing. The `create` job
+  # deliberately sits in its own group so it can never be cancelled part-way
+  # through creating a repository.
+  group: new-repository-validate-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    # Only act on an issue that carries the label, and only when the issue was
+    # just opened with it or that specific label was just added. Without the
+    # second clause, adding any unrelated label to an existing request would
+    # re-trigger creation. The state check stops a closed, already-fulfilled
+    # request from being replayed.
+    if: >-
+      github.event.issue.state == 'open' &&
+      contains(github.event.issue.labels.*.name, 'new-repository') &&
+      (github.event.action == 'opened' || github.event.label.name == 'new-repository')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Get app installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.PERIBOLOS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PERIBOLOS_APP_PRIVATE_KEY }}
+          owner: pyvista
+          # Read-only. This job runs before the approval gate, so it must not
+          # be able to mutate anything. Members read is needed to see private
+          # org members when checking the requester's membership.
+          permission-administration: read
+          permission-metadata: read
+          permission-members: read
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: latest
+
+      # Fetched from the API rather than read from github.event.issue.body so
+      # that both jobs judge the same thing an admin sees on the issue, and so
+      # the body never passes through a shell interpolation.
+      - name: Fetch the issue body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" --jq .body > issue-body.md
+
+      - name: Validate the request
+        id: validate
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+        run: uv run scripts/create-repo.py --check --body-file issue-body.md --author "$ISSUE_AUTHOR"
+
+      - name: Note that the request is awaiting approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO_NAME: ${{ steps.validate.outputs.repo_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+            "Request validated: \`pyvista/$REPO_NAME\`.
+
+          @pyvista/admin — approve the pending deployment to create it: $RUN_URL"
+
+      # Unconditional on failure. The script only writes the error file for
+      # problems the requester can fix; an API or network failure leaves no
+      # file, and silence would strand the issue looking like it succeeded.
+      - name: Report the problem on the issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -f repo-request-error.md ]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file repo-request-error.md
+          else
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+              "Validation failed unexpectedly, so nothing was created. @pyvista/admin — see $RUN_URL"
+          fi
+
+    outputs:
+      repo_name: ${{ steps.validate.outputs.repo_name }}
+
+  create:
+    needs: validate
+    runs-on: ubuntu-latest
+    # Gated in repo Settings → Environments. Required reviewers on this
+    # environment are the approval step; the job waits until an admin approves.
+    environment: repo-creation
+    # Its own group, never cancelled. Re-labelling the issue while an approved
+    # run is mid-flight must not kill it between creating the repo and applying
+    # its settings.
+    concurrency:
+      group: new-repository-create-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+      # To dispatch the apply workflow below.
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Get app installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.PERIBOLOS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PERIBOLOS_APP_PRIVATE_KEY }}
+          owner: pyvista
+          # organization-administration creates the repo, administration
+          # applies its settings and the `release` environment.
+          permission-organization-administration: write
+          permission-administration: write
+          permission-metadata: read
+          permission-members: read
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: latest
+
+      # Re-fetched after the approval wait, not carried over from the validate
+      # job. github.event.issue.body is frozen at the moment the run started,
+      # so trusting it would let a request be edited to look harmless on the
+      # issue an admin reads while the original text is what gets built.
+      - name: Fetch the issue body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" --jq .body > issue-body.md
+
+      - name: Create the repository
+        id: create
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          EXPECT_NAME: ${{ needs.validate.outputs.repo_name }}
+        # --expect-name makes a request that changed during the approval wait a
+        # hard failure rather than a silent substitution.
+        run: |
+          uv run scripts/create-repo.py \
+            --body-file issue-body.md \
+            --author "$ISSUE_AUTHOR" \
+            --expect-name "$EXPECT_NAME"
+
+      - name: Report success and close the issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file repo-created.md
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed
+
+      # After the success comment, and non-fatal. The repo exists by this
+      # point, so a failed dispatch is a delay (the daily cron still picks the
+      # repo up) rather than a failed request.
+      - name: Trigger peribolos apply to grant team access
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        # workflow_dispatch is the documented exception to the rule that events
+        # raised with GITHUB_TOKEN do not start new workflow runs, so this does
+        # not need the App token.
+        run: |
+          if ! gh workflow run apply.yml --repo "$GITHUB_REPOSITORY" --ref main; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+              "Could not trigger the \`apply\` workflow. Team access will be granted by the next daily run instead. @pyvista/admin can run it now from the Actions tab."
+          fi
+
+      - name: Report the problem on the issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -f repo-request-error.md ]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file repo-request-error.md
+          else
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+              "Creation failed part-way. The repository may exist without its settings applied. @pyvista/admin — see $RUN_URL"
+          fi

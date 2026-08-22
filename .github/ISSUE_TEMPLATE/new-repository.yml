@@ -1,0 +1,56 @@
+name: New repository
+description: Request a new repository under the pyvista organization
+title: "New repository: "
+labels: ["new-repository"]
+# The `label:` values below are load-bearing. GitHub renders each one as a
+# `### <label>` heading in the issue body, and scripts/create-repo.py reads the
+# request back out by matching those headings. Renaming a label here without
+# updating the matching constant in that script breaks every request.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Filing this form queues the repository for creation. A member of
+        `@pyvista/admin` reviews and approves it, and the repository is created
+        automatically. Nothing is created until an admin approves.
+
+        Requesting an org member is a prerequisite. If you are not yet a member,
+        [ask for membership first](https://github.com/pyvista/admin#join-the-pyvista-org-as-a-member).
+
+  - type: input
+    id: name
+    attributes:
+      label: Repository name
+      description: Lowercase, hyphenated. Sphinx extensions are prefixed `sphinx-`.
+      placeholder: sphinx-autocodelink
+    validations:
+      required: true
+
+  - type: input
+    id: description
+    attributes:
+      label: Description
+      description: One line. Becomes the repository's GitHub description.
+      placeholder: Sphinx extension that turns code literals into API links
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      description: What it does, and why it belongs under `pyvista/` rather than your own account.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: release-env
+    attributes:
+      label: PyPI trusted publishing
+      description: >-
+        Tick this if the repository will publish to PyPI. It adds a `release`
+        environment for the OIDC trusted publisher. You still configure the
+        publisher on PyPI yourself.
+      options:
+        - label: Create a `release` environment
+          required: false
