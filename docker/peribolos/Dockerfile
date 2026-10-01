@@ -3,4 +3,4 @@
 # This Dockerfile exists solely to give Dependabot's `docker` ecosystem a
 # file to watch — see .github/dependabot.yml. The script parses the FROM
 # line below; it does not run `docker build`.
-FROM us-docker.pkg.dev/k8s-infra-prow/images/peribolos@sha256:409816bcb7274924aa920ccc632f2bd1d52402fc0e836039cc7d9601aba2fbd9
+FROM us-docker.pkg.dev/k8s-infra-prow/images/peribolos@sha256:2475c4f5395fe4c3fd843aa5fb30b56206da9bfec2a3120694ebe21162a01178
