@@ -1,13 +1,8 @@
 """Baseline repository settings for the pyvista org.
 
-Single source of truth for "how should a pyvista repo be configured", shared by
-the two things that care:
-
-- ``scripts/sync-repos.py`` merges REPO_BASELINE into every public non-archived
-  repo entry of the expanded org.yaml, for peribolos to reconcile.
-- ``scripts/create-repo.py`` applies NEW_REPO_SETTINGS through the REST API when
-  a new repo is created, so it starts out matching the baseline instead of
-  waiting on a reconcile.
+Single source of truth for "how should a pyvista repo be configured".
+``scripts/sync-repos.py`` merges REPO_BASELINE into every public non-archived
+repo entry of the expanded org.yaml, for peribolos to reconcile.
 
 The convention: squash-only merges, PR title as the commit subject, auto-merge
 on, head branch deleted on merge, no wiki, no per-repo projects.
@@ -75,14 +70,3 @@ PERIBOLOS_PASSENGER_ONLY: frozenset[str] = frozenset(
         "squash_merge_commit_title",
     }
 )
-
-# What a brand-new repo gets. The baseline plus per-repo projects off.
-#
-# has_projects is deliberately not in REPO_BASELINE: the org already sets
-# has_repository_projects: false org-wide, so adding it there would widen the
-# diff of the first --fix-repos run across every existing repo for no
-# behavioural gain. Setting it explicitly on a new repo costs nothing.
-NEW_REPO_SETTINGS: dict[str, object] = {
-    **REPO_BASELINE,
-    "has_projects": False,
-}

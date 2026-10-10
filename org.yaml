@@ -13,11 +13,9 @@ admins:
 # --- Org-wide policies ---
 # Members get nothing by default; access comes only via teams.
 default_repository_permission: none
-# GitHub cannot restrict repo creation to a specific team. `false` means only
-# org admins (the `admins` list above) can create repos. Maintainers open an
-# issue or PR to request a new repo; an admin creates it and the daily apply
-# enrolls it into the core teams automatically.
-members_can_create_repositories: false
+# GitHub cannot restrict repo creation to a specific team, so this lets every
+# member create repos. The daily apply enrolls new repos into the core teams.
+members_can_create_repositories: true
 two_factor_requirement_enabled: true
 # Projects (classic) are off everywhere. Individual repos may still re-enable
 # via `has_projects: true` in the repos section below if there's a real need.
@@ -107,6 +105,8 @@ teams:
             maintainers:
             - akaszynski
             - banesullivan
+            members:
+            - user27182
             privacy: closed
           ci-reviewers:
             description: CODEOWNERS routing target for PRs that modify CI workflows. Members inherit maintainers access via team nesting; this team itself grants no repo access.

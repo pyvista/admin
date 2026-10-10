@@ -1,5 +1,3 @@
-# Everything else the README points people at is a free-form issue, so keep the
-# blank template available alongside the New repository form.
 blank_issues_enabled: true
 contact_links:
   - name: General pyvista question
